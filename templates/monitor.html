@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor - Claude Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: {
+                fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                colors: { claude: { bg: '#0f0e17', surface: '#1a1a2e', surface2: '#232340', border: '#2d2b55', accent: '#7c3aed', accent2: '#a78bfa', text: '#e2e0f0', muted: '#8b89a6' } }
+            }}
+        }
+    </script>
+    <style>
+        body { background: #0f0e17; color: #e2e0f0; font-family: 'Inter', system-ui, sans-serif; margin: 0; overflow: hidden; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: #3d3b65; border-radius: 2px; }
+
+        .pane {
+            border: 1px solid #2d2b55;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background: #0f0e17;
+            transition: border-color 0.2s;
+            position: relative;
+        }
+        .pane:hover { border-color: #7c3aed; }
+        .pane.pane-active { border-color: #22c55e; }
+        .pane.pane-empty { border-style: dashed; border-color: #2d2b55; }
+
+        .pane-header {
+            background: #1a1a2e;
+            border-bottom: 1px solid #2d2b55;
+            padding: 6px 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            min-height: 34px;
+        }
+        .pane-header select {
+            background: #232340;
+            border: 1px solid #2d2b55;
+            color: #e2e0f0;
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            outline: none;
+            max-width: 200px;
+        }
+        .pane-header select:focus { border-color: #7c3aed; }
+
+        .pane-body {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+            min-height: 0;
+        }
+        .pane-body iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .pane-empty-content {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #8b89a6;
+            font-size: 0.8rem;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .grid-container {
+            display: grid;
+            gap: 6px;
+            padding: 6px;
+            height: calc(100vh - 48px);
+        }
+
+        /* Layout presets */
+        .layout-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+        .layout-2h { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+        .layout-2v { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+        .layout-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+        .layout-3 .pane:first-child { grid-row: 1 / 3; }
+        .layout-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+        .layout-6 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+        .toolbar-btn {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+        .toolbar-btn:hover { background: rgba(124,58,237,0.15); color: #a78bfa; }
+        .toolbar-btn.active { background: rgba(124,58,237,0.2); border-color: #7c3aed; color: #a78bfa; }
+
+        .layout-icon { display: inline-flex; gap: 2px; align-items: center; }
+        .layout-icon .block { width: 8px; height: 8px; border: 1px solid currentColor; border-radius: 1px; }
+        .layout-icon .block.tall { height: 18px; }
+
+        .pane-close {
+            width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+            border-radius: 3px; cursor: pointer; color: #8b89a6; font-size: 0.7rem;
+            transition: all 0.15s;
+        }
+        .pane-close:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+
+        .pane-expand {
+            width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+            border-radius: 3px; cursor: pointer; color: #8b89a6; font-size: 0.6rem;
+            transition: all 0.15s;
+        }
+        .pane-expand:hover { background: rgba(124,58,237,0.2); color: #a78bfa; }
+
+        /* Drag and drop */
+        .pane-header.drag-handle { cursor: grab; }
+        .pane-header.drag-handle:active { cursor: grabbing; }
+        .pane.pane-dragging { opacity: 0.4; border-color: #7c3aed; }
+        .pane.pane-drag-over {
+            border-color: #a78bfa !important;
+            box-shadow: 0 0 0 2px rgba(124,58,237,0.3), inset 0 0 20px rgba(124,58,237,0.05);
+        }
+        .pane.pane-drag-over .pane-header {
+            background: rgba(124,58,237,0.15);
+        }
+        .drag-ghost {
+            background: #1a1a2e;
+            border: 1px solid #7c3aed;
+            border-radius: 6px;
+            padding: 4px 12px;
+            font-size: 0.75rem;
+            color: #a78bfa;
+            font-family: 'Inter', system-ui, sans-serif;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Toolbar -->
+    <div class="h-12 bg-claude-surface border-b border-claude-border flex items-center px-4 gap-3">
+        <a href="/" class="text-claude-muted hover:text-claude-accent2 transition-colors mr-1">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        </a>
+        <span class="text-sm font-semibold text-claude-text">Monitor</span>
+
+        <div class="h-5 w-px bg-claude-border mx-2"></div>
+
+        <!-- Layout buttons -->
+        <span class="text-xs text-claude-muted mr-1">Layout:</span>
+        <button class="toolbar-btn active" data-layout="1" onclick="setLayout('1', this)" title="Single pane">
+            <span class="layout-icon"><span class="block" style="width:14px;height:14px;"></span></span>
+        </button>
+        <button class="toolbar-btn" data-layout="2h" onclick="setLayout('2h', this)" title="2 panes horizontal">
+            <span class="layout-icon"><span class="block"></span><span class="block"></span></span>
+        </button>
+        <button class="toolbar-btn" data-layout="2v" onclick="setLayout('2v', this)" title="2 panes vertical">
+            <span class="layout-icon" style="flex-direction:column;"><span class="block" style="width:14px;height:6px;"></span><span class="block" style="width:14px;height:6px;"></span></span>
+        </button>
+        <button class="toolbar-btn" data-layout="3" onclick="setLayout('3', this)" title="3 panes (1+2)">
+            <span class="layout-icon"><span class="block tall"></span><span class="layout-icon" style="flex-direction:column;gap:2px;"><span class="block"></span><span class="block"></span></span></span>
+        </button>
+        <button class="toolbar-btn" data-layout="4" onclick="setLayout('4', this)" title="4 panes grid">
+            <span class="layout-icon" style="flex-wrap:wrap;width:20px;"><span class="block"></span><span class="block"></span><span class="block"></span><span class="block"></span></span>
+        </button>
+        <button class="toolbar-btn" data-layout="6" onclick="setLayout('6', this)" title="6 panes grid">
+            <span class="layout-icon" style="flex-wrap:wrap;width:28px;"><span class="block"></span><span class="block"></span><span class="block"></span><span class="block"></span><span class="block"></span><span class="block"></span></span>
+        </button>
+
+        <div class="h-5 w-px bg-claude-border mx-2"></div>
+
+        <button class="toolbar-btn" onclick="autoFillActive()" title="Auto-fill with active sessions">
+            <span class="flex items-center gap-1.5">
+                <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                Auto-fill active
+            </span>
+        </button>
+
+        <div class="ml-auto flex items-center gap-3">
+            <span id="active-count" class="text-xs text-claude-muted"></span>
+            <a href="/live" class="toolbar-btn text-claude-muted">Live List</a>
+            <a href="/" class="toolbar-btn text-claude-muted">Dashboard</a>
+        </div>
+    </div>
+
+    <!-- Pane grid -->
+    <div id="grid" class="grid-container layout-1">
+        <!-- Panes are generated by JavaScript -->
+    </div>
+
+    <script>
+    (function() {
+        var grid = document.getElementById('grid');
+        var activeCountEl = document.getElementById('active-count');
+
+        // Available sessions from server
+        var activeSessions = {{ active_sessions | tojson }};
+
+        // All known sessions (populated from API)
+        var allSessions = activeSessions.slice();
+
+        // Pane state
+        var panes = [];
+        var currentLayout = '1';
+        var layoutPaneCounts = { '1': 1, '2h': 2, '2v': 2, '3': 3, '4': 4, '6': 6 };
+
+        function getSessionLabel(s) {
+            var slug = s.slug || s.session_id.substring(0, 8);
+            return s.project_name ? s.project_name + ' / ' + slug : slug;
+        }
+
+        function buildSelectOptions() {
+            var opts = '<option value="">-- Select session --</option>';
+            // Active sessions first
+            if (activeSessions.length > 0) {
+                opts += '<optgroup label="Active">';
+                activeSessions.forEach(function(s) {
+                    var key = s.project_dir_name + '/' + s.session_id;
+                    var label = getSessionLabel(s);
+                    var agent = s.agent_name ? ' [' + s.agent_name + ']' : '';
+                    opts += '<option value="' + key + '">🟢 ' + label + agent + '</option>';
+                });
+                opts += '</optgroup>';
+            }
+            return opts;
+        }
+
+        function createPane(index, sessionKey) {
+            var div = document.createElement('div');
+            div.className = 'pane pane-empty';
+            div.id = 'pane-' + index;
+            div.setAttribute('data-index', index);
+
+            var header = document.createElement('div');
+            header.className = 'pane-header drag-handle';
+            header.draggable = true;
+
+            var leftGroup = document.createElement('div');
+            leftGroup.className = 'flex items-center gap-2 min-w-0 flex-1';
+
+            var label = document.createElement('span');
+            label.className = 'text-xs text-claude-muted flex-shrink-0';
+            label.textContent = '#' + (index + 1);
+
+            var select = document.createElement('select');
+            select.innerHTML = buildSelectOptions();
+            select.setAttribute('data-pane', index);
+            select.onchange = function() { loadSession(index, this.value); };
+            // Prevent drag when interacting with select
+            select.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+            select.addEventListener('dragstart', function(e) { e.stopPropagation(); e.preventDefault(); });
+
+            leftGroup.appendChild(label);
+            leftGroup.appendChild(select);
+
+            var rightGroup = document.createElement('div');
+            rightGroup.className = 'flex items-center gap-1';
+
+            var expandBtn = document.createElement('div');
+            expandBtn.className = 'pane-expand';
+            expandBtn.title = 'Open in new tab';
+            expandBtn.innerHTML = '↗';
+            expandBtn.onclick = function() {
+                var key = panes[index] ? panes[index].sessionKey : '';
+                if (key) window.open('/live/' + key, '_blank');
+            };
+
+            var closeBtn = document.createElement('div');
+            closeBtn.className = 'pane-close';
+            closeBtn.title = 'Clear pane';
+            closeBtn.innerHTML = '✕';
+            closeBtn.onclick = function() { clearPane(index); };
+
+            rightGroup.appendChild(expandBtn);
+            rightGroup.appendChild(closeBtn);
+
+            header.appendChild(leftGroup);
+            header.appendChild(rightGroup);
+
+            var body = document.createElement('div');
+            body.className = 'pane-body';
+            body.id = 'pane-body-' + index;
+            body.innerHTML = '<div class="pane-empty-content"><svg class="w-8 h-8 text-claude-border" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg><span>Select a session to monitor</span></div>';
+
+            div.appendChild(header);
+            div.appendChild(body);
+            grid.appendChild(div);
+
+            panes[index] = { element: div, sessionKey: '', iframe: null };
+
+            // --- Drag and drop events ---
+            header.addEventListener('dragstart', function(e) {
+                dragSourceIndex = index;
+                div.classList.add('pane-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(index));
+
+                // Custom drag ghost
+                var ghost = document.createElement('div');
+                ghost.className = 'drag-ghost';
+                var pane = panes[index];
+                ghost.textContent = pane && pane.sessionKey ? '#' + (index+1) + ' ' + pane.sessionKey.split('/').pop().substring(0,8) : '#' + (index+1) + ' (empty)';
+                document.body.appendChild(ghost);
+                e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, ghost.offsetHeight / 2);
+                setTimeout(function() { document.body.removeChild(ghost); }, 0);
+            });
+
+            header.addEventListener('dragend', function() {
+                div.classList.remove('pane-dragging');
+                dragSourceIndex = null;
+                document.querySelectorAll('.pane').forEach(function(p) {
+                    p.classList.remove('pane-drag-over');
+                });
+            });
+
+            div.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            });
+
+            div.addEventListener('dragenter', function(e) {
+                e.preventDefault();
+                if (dragSourceIndex !== null && dragSourceIndex !== index) {
+                    div.classList.add('pane-drag-over');
+                }
+            });
+
+            div.addEventListener('dragleave', function(e) {
+                // Only remove highlight when leaving the pane entirely
+                if (!div.contains(e.relatedTarget)) {
+                    div.classList.remove('pane-drag-over');
+                }
+            });
+
+            div.addEventListener('drop', function(e) {
+                e.preventDefault();
+                div.classList.remove('pane-drag-over');
+                var srcIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                if (!isNaN(srcIdx) && srcIdx !== index) {
+                    swapPaneContents(srcIdx, index);
+                }
+            });
+
+            if (sessionKey) {
+                select.value = sessionKey;
+                loadSession(index, sessionKey);
+            }
+        }
+
+        var dragSourceIndex = null;
+
+        function swapPaneContents(aIdx, bIdx) {
+            var a = panes[aIdx];
+            var b = panes[bIdx];
+            if (!a || !b) return;
+
+            // Save state
+            var aKey = a.sessionKey;
+            var bKey = b.sessionKey;
+
+            // Swap by clearing and reloading — avoids moving iframes which causes reloads
+            // First, detach existing iframes to avoid flash
+            var bodyA = document.getElementById('pane-body-' + aIdx);
+            var bodyB = document.getElementById('pane-body-' + bIdx);
+            var selectA = a.element.querySelector('select');
+            var selectB = b.element.querySelector('select');
+
+            // If both have iframes, swap the iframe src directly
+            if (a.iframe && b.iframe) {
+                var tmpSrc = a.iframe.src;
+                a.iframe.src = b.iframe.src;
+                b.iframe.src = tmpSrc;
+                a.sessionKey = bKey;
+                b.sessionKey = aKey;
+                if (selectA) selectA.value = bKey;
+                if (selectB) selectB.value = aKey;
+                // Update pane classes
+                a.element.classList.toggle('pane-active', !!bKey);
+                a.element.classList.toggle('pane-empty', !bKey);
+                b.element.classList.toggle('pane-active', !!aKey);
+                b.element.classList.toggle('pane-empty', !aKey);
+            } else {
+                // One or both are empty — clear both and reload
+                clearPane(aIdx);
+                clearPane(bIdx);
+                if (bKey) {
+                    if (selectA) selectA.value = bKey;
+                    loadSession(aIdx, bKey);
+                }
+                if (aKey) {
+                    if (selectB) selectB.value = aKey;
+                    loadSession(bIdx, aKey);
+                }
+            }
+        }
+
+        function loadSession(index, sessionKey) {
+            var pane = panes[index];
+            if (!pane) return;
+
+            var body = document.getElementById('pane-body-' + index);
+            var paneEl = pane.element;
+
+            if (!sessionKey) {
+                clearPane(index);
+                return;
+            }
+
+            pane.sessionKey = sessionKey;
+            paneEl.classList.remove('pane-empty');
+            paneEl.classList.add('pane-active');
+
+            // Create iframe
+            body.innerHTML = '';
+            var iframe = document.createElement('iframe');
+            iframe.src = '/live/' + sessionKey + '?embed=1';
+            body.appendChild(iframe);
+            pane.iframe = iframe;
+        }
+
+        function clearPane(index) {
+            var pane = panes[index];
+            if (!pane) return;
+
+            var body = document.getElementById('pane-body-' + index);
+            var select = pane.element.querySelector('select');
+
+            pane.sessionKey = '';
+            pane.iframe = null;
+            pane.element.classList.add('pane-empty');
+            pane.element.classList.remove('pane-active');
+            if (select) select.value = '';
+
+            body.innerHTML = '<div class="pane-empty-content"><svg class="w-8 h-8 text-claude-border" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg><span>Select a session to monitor</span></div>';
+        }
+
+        window.setLayout = function(layout, btn) {
+            // Save current session assignments
+            var saved = [];
+            panes.forEach(function(p) { saved.push(p ? p.sessionKey : ''); });
+
+            // Update active button
+            document.querySelectorAll('.toolbar-btn[data-layout]').forEach(function(b) { b.classList.remove('active'); });
+            if (btn) btn.classList.add('active');
+
+            currentLayout = layout;
+            var count = layoutPaneCounts[layout] || 1;
+
+            // Clear grid
+            grid.innerHTML = '';
+            grid.className = 'grid-container layout-' + layout;
+            panes = [];
+
+            // Create panes
+            for (var i = 0; i < count; i++) {
+                createPane(i, saved[i] || '');
+            }
+        };
+
+        window.autoFillActive = function() {
+            // Determine best layout for number of active sessions
+            var n = activeSessions.length;
+            var layout = '1';
+            if (n >= 6) layout = '6';
+            else if (n >= 4) layout = '4';
+            else if (n >= 3) layout = '3';
+            else if (n >= 2) layout = '2h';
+
+            // Set layout and fill
+            var btn = document.querySelector('[data-layout="' + layout + '"]');
+            setLayout(layout, btn);
+
+            var count = layoutPaneCounts[layout];
+            for (var i = 0; i < Math.min(n, count); i++) {
+                var s = activeSessions[i];
+                var key = s.project_dir_name + '/' + s.session_id;
+                var select = panes[i].element.querySelector('select');
+                if (select) select.value = key;
+                loadSession(i, key);
+            }
+        };
+
+        // Initialize with 1 pane
+        createPane(0, '');
+
+        // Update active count
+        activeCountEl.textContent = activeSessions.length + ' active session' + (activeSessions.length !== 1 ? 's' : '');
+
+        // Periodically refresh active sessions list
+        setInterval(function() {
+            fetch('/api/active')
+                .then(function(r) { return r.json(); })
+                .then(function(sessions) {
+                    activeSessions = sessions;
+                    activeCountEl.textContent = sessions.length + ' active session' + (sessions.length !== 1 ? 's' : '');
+                    // Update all select dropdowns
+                    var opts = buildSelectOptions();
+                    document.querySelectorAll('.pane-header select').forEach(function(sel) {
+                        var current = sel.value;
+                        sel.innerHTML = opts;
+                        sel.value = current;
+                    });
+                })
+                .catch(function() {});
+        }, 10000);
+
+        // Listen for messages from embedded panes
+        window.addEventListener('message', function(event) {
+            if (!event.data || !event.data.type) return;
+            if (event.data.type === 'pane-status') {
+                // Could update pane border color etc
+            }
+        });
+
+        // Auto-fill if there are active sessions on load
+        if (activeSessions.length > 0) {
+            autoFillActive();
+        }
+    })();
+    </script>
+</body>
+</html>

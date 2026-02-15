@@ -1,0 +1,564 @@
+{% extends "base.html" %}
+{% block title %}🔴 {{ session.slug or session.session_id[:12] }} - Live{% endblock %}
+
+{% block sidebar %}
+<a href="/live" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">←</span>Live Sessions
+</a>
+<a href="/session/{{ session.project_dir_name }}/{{ session.session_id }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
+    <span class="mr-2">📄</span>Static View
+</a>
+<div class="mt-3 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Session</div>
+    <div class="text-sm text-claude-text font-medium truncate" title="{{ session.slug or session.session_id }}">{{ session.slug or session.session_id[:12] }}</div>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .msg-user { border-left: 3px solid #0d9488; }
+    .msg-assistant { border-left: 3px solid #7c3aed; }
+    .msg-user .msg-role-badge { background: rgba(13, 148, 136, 0.15); color: #5eead4; }
+    .msg-assistant .msg-role-badge { background: rgba(124, 58, 237, 0.15); color: #c4b5fd; }
+
+    .tool-card {
+        border-left: 3px solid #4b5563;
+        transition: border-color 0.2s;
+    }
+    .tool-header { cursor: pointer; user-select: none; }
+    .tool-header:hover { background: rgba(255,255,255,0.03); }
+
+    .msg-content { white-space: pre-wrap; word-wrap: break-word; line-height: 1.6; }
+
+    .thinking-block {
+        border-left: 2px solid #4b5563;
+        background: rgba(75, 85, 99, 0.1);
+    }
+
+    .token-badge {
+        font-size: 0.65rem; padding: 2px 6px; border-radius: 4px;
+        background: rgba(139, 137, 166, 0.15); color: #8b89a6;
+    }
+
+    .tool-border-Bash { border-left-color: #22c55e !important; }
+    .tool-border-Read, .tool-border-Glob, .tool-border-Grep { border-left-color: #3b82f6 !important; }
+    .tool-border-Write, .tool-border-Edit { border-left-color: #f97316 !important; }
+    .tool-border-Task { border-left-color: #a855f7 !important; }
+    .tool-border-WebFetch, .tool-border-WebSearch { border-left-color: #06b6d4 !important; }
+    .tool-border-SendMessage { border-left-color: #eab308 !important; }
+
+    .new-entry {
+        animation: slideIn 0.4s ease-out;
+    }
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .pending-tool {
+        animation: pulse-border 2s infinite;
+    }
+    @keyframes pulse-border {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    .status-bar {
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+    }
+
+    .copy-btn { opacity: 0; transition: opacity 0.15s; }
+    .code-wrapper:hover .copy-btn { opacity: 1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Live status bar (sticky) -->
+    <div id="status-bar" class="sticky top-14 z-10 status-bar bg-claude-surface/90 border border-green-500/30 rounded-xl px-5 py-3 mb-6">
+        <div class="flex items-center justify-between flex-wrap gap-3">
+            <div class="flex items-center gap-3">
+                <span id="live-indicator" class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <div>
+                    <span class="text-sm font-semibold text-claude-text">{{ session.slug or session.session_id[:12] }}</span>
+                    {% if session.agent_name %}
+                    <a href="/team/{{ session.team_name }}/member/{{ session.agent_name }}" class="ml-2 px-1.5 py-0.5 text-xs bg-yellow-500/15 text-yellow-300 rounded hover:bg-yellow-500/25 transition-colors" title="Team: {{ session.team_name }}">{{ session.agent_name }}</a>
+                    {% endif %}
+                    <span id="status-text" class="text-xs text-green-400 ml-2">Streaming...</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-4 text-xs text-claude-muted">
+                <span id="msg-count">{{ session.message_count }} msgs</span>
+                <span id="token-count">{{ (session.total_output_tokens or 0) | format_tokens }} tokens out</span>
+                {% if session.model %}
+                <span class="px-2 py-0.5 rounded-full bg-claude-surface2">{{ session.model }}</span>
+                {% endif %}
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="auto-scroll" checked class="rounded text-green-500 bg-claude-surface2 border-claude-border">
+                    <span>Auto-scroll</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session info (collapsible) -->
+    <div class="mb-4">
+        <button onclick="toggleCollapse('session-info')" class="flex items-center gap-2 text-sm text-claude-muted hover:text-claude-text transition-colors">
+            <svg id="icon-session-info" class="w-3 h-3 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+            </svg>
+            Session Details
+        </button>
+        <div id="session-info" class="collapsible-body">
+            <div class="bg-claude-surface rounded-xl border border-claude-border p-5 mt-2">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                        <div class="text-claude-muted text-xs mb-1">Working Dir</div>
+                        <div class="text-claude-text font-mono text-xs truncate" title="{{ session.cwd }}">{{ session.cwd }}</div>
+                    </div>
+                    <div>
+                        <div class="text-claude-muted text-xs mb-1">Git Branch</div>
+                        <div class="text-claude-text font-mono text-xs">{{ session.git_branch or '-' }}</div>
+                    </div>
+                    <div>
+                        <div class="text-claude-muted text-xs mb-1">Started</div>
+                        <div class="text-claude-text text-xs" title="{{ session.start_time }}">{{ session.start_time | time_ago }}</div>
+                    </div>
+                    <div>
+                        <div class="text-claude-muted text-xs mb-1">Version</div>
+                        <div class="text-claude-text text-xs">{{ session.version or '-' }}</div>
+                    </div>
+                </div>
+
+                {% if session.tool_summary %}
+                <div class="mt-4 pt-3 border-t border-claude-border/50">
+                    <div class="text-xs text-claude-muted mb-2">Tools Used</div>
+                    <div class="flex flex-wrap gap-2">
+                        {% for tool_name, info in session.tool_summary.items() %}
+                        <span class="px-2 py-0.5 rounded bg-claude-surface2 text-xs text-claude-text">
+                            {{ tool_name }} <span class="text-claude-muted">×{{ info.count }}</span>
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Conversation timeline -->
+    <div id="timeline" class="space-y-4">
+        {% for entry in session.timeline %}
+        {% set msg_idx = loop.index0 %}
+        <div class="message-block" data-index="{{ msg_idx }}" data-role="{{ entry.role }}">
+            {% if entry.role == 'user' %}
+            <div class="msg-user bg-claude-surface rounded-xl p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">User</span>
+                        {% if entry.timestamp %}
+                        <span class="text-xs text-claude-muted" title="{{ entry.timestamp }}">{{ entry.timestamp | short_time }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="msg-content text-sm text-claude-text">{{ entry.content }}</div>
+            </div>
+            {% elif entry.role == 'assistant' %}
+            <div class="msg-assistant bg-claude-surface rounded-xl p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">Assistant</span>
+                        {% if entry.timestamp %}
+                        <span class="text-xs text-claude-muted" title="{{ entry.timestamp }}">{{ entry.timestamp | short_time }}</span>
+                        {% endif %}
+                    </div>
+                    {% if entry.input_tokens or entry.output_tokens %}
+                    <span class="token-badge font-mono">
+                        in: {{ entry.input_tokens | format_tokens }} | out: {{ entry.output_tokens | format_tokens }}
+                    </span>
+                    {% endif %}
+                </div>
+                {% if entry.has_thinking and entry.thinking_text %}
+                <div class="mb-4">
+                    <button onclick="toggleCollapse('thinking-{{ msg_idx }}')" class="flex items-center gap-2 text-xs text-claude-muted hover:text-claude-text transition-colors mb-1">
+                        <svg id="icon-thinking-{{ msg_idx }}" class="w-3 h-3 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M6.293 4.293a1 1 0 011.414 0L12 8.586l4.293-4.293a1 1 0 111.414 1.414l-5 5a1 1 0 01-1.414 0l-5-5a1 1 0 010-1.414z"/>
+                        </svg>
+                        💭 Thinking
+                    </button>
+                    <div id="thinking-{{ msg_idx }}" class="collapsible-body">
+                        <div class="thinking-block rounded-lg p-4 mt-1 text-xs text-claude-muted msg-content max-h-96 overflow-y-auto">{{ entry.thinking_text }}</div>
+                    </div>
+                </div>
+                {% endif %}
+                {% if entry.content %}
+                <div class="msg-content text-sm text-claude-text mb-4">{{ entry.content }}</div>
+                {% endif %}
+                {% if entry.tool_calls %}
+                <div class="space-y-2 mt-3">
+                    {% for tc in entry.tool_calls %}
+                    <div class="tool-card tool-border-{{ tc.tool_name }} rounded-lg bg-claude-bg/50 overflow-hidden {% if not tc.output_result %}pending-tool{% endif %}" data-tool-id="{{ tc.tool_use_id }}">
+                        <div class="tool-header flex items-center justify-between px-4 py-2.5" onclick="toggleCollapse('tool-{{ msg_idx }}-{{ loop.index0 }}')">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <svg id="icon-tool-{{ msg_idx }}-{{ loop.index0 }}" class="w-3 h-3 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                </svg>
+                                <span class="text-sm flex-shrink-0">{% if tc.tool_name == 'Bash' %}💻{% elif tc.tool_name == 'Read' %}📖{% elif tc.tool_name == 'Write' %}✏️{% elif tc.tool_name == 'Edit' %}🔧{% elif tc.tool_name == 'Grep' %}🔍{% elif tc.tool_name == 'Glob' %}📁{% elif tc.tool_name == 'Task' %}🤖{% elif tc.tool_name == 'WebFetch' %}🌐{% elif tc.tool_name == 'WebSearch' %}🔎{% elif tc.tool_name == 'SendMessage' %}💬{% else %}⚡{% endif %}</span>
+                                <span class="text-sm font-medium text-claude-text flex-shrink-0">{{ tc.tool_name }}</span>
+                                <span class="text-xs text-claude-muted truncate">{{ tc.input_params }}</span>
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                                {% if not tc.output_result %}
+                                <span class="text-xs text-yellow-400">⏳ running</span>
+                                {% elif tc.duration_ms %}
+                                <span class="text-xs text-claude-muted">{{ tc.duration_ms | format_duration }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div id="tool-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                            <div class="px-4 pb-3 border-t border-claude-border/30">
+                                {% if tc.input_params_raw %}
+                                <div class="mt-3">
+                                    <button onclick="toggleCollapse('input-{{ msg_idx }}-{{ loop.index0 }}')" class="text-xs text-claude-muted hover:text-claude-text transition-colors mb-1 flex items-center gap-1">
+                                        <svg id="icon-input-{{ msg_idx }}-{{ loop.index0 }}" class="w-2.5 h-2.5 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                        </svg>
+                                        Input Parameters
+                                    </button>
+                                    <div id="input-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                                        <pre class="mt-1 text-xs overflow-x-auto max-h-96"><code class="language-json">{{ tc.input_params_raw | tojson(indent=2) }}</code></pre>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% if tc.output_result %}
+                                <div class="mt-3">
+                                    <div class="text-xs text-claude-muted mb-1">Output{% if tc.output_result_full_length and tc.output_result_full_length > 5000 %} <span class="text-claude-muted">(truncated)</span>{% endif %}</div>
+                                    <div class="code-wrapper relative">
+                                        <button class="copy-btn absolute top-2 right-2 px-2 py-1 text-xs bg-claude-surface2 text-claude-muted rounded hover:text-claude-text" onclick="copyText(this)">Copy</button>
+                                        <pre class="mt-1 text-xs overflow-x-auto max-h-96 overflow-y-auto"><code>{{ tc.output_result }}</code></pre>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Bottom spacer for auto-scroll comfort -->
+    <div id="scroll-anchor" class="h-8"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    var timeline = document.getElementById('timeline');
+    var statusText = document.getElementById('status-text');
+    var liveIndicator = document.getElementById('live-indicator');
+    var msgCount = document.getElementById('msg-count');
+    var tokenCount = document.getElementById('token-count');
+    var autoScrollCb = document.getElementById('auto-scroll');
+    var scrollAnchor = document.getElementById('scroll-anchor');
+
+    var totalMsgs = {{ session.message_count }};
+    var totalTokens = {{ session.total_output_tokens or 0 }};
+    var messageIndex = document.querySelectorAll('.message-block').length;
+
+    // Pending tool calls waiting for results
+    var pendingTools = {};
+    document.querySelectorAll('.pending-tool').forEach(function(el) {
+        var id = el.getAttribute('data-tool-id');
+        if (id) pendingTools[id] = el;
+    });
+
+    // Tool emoji helper
+    function toolEmoji(name) {
+        var map = {
+            'Bash': '💻', 'Read': '📖', 'Write': '✏️', 'Edit': '🔧',
+            'Grep': '🔍', 'Glob': '📁', 'Task': '🤖', 'WebFetch': '🌐',
+            'WebSearch': '🔎', 'SendMessage': '💬'
+        };
+        return map[name] || '⚡';
+    }
+
+    function toolBorderClass(name) {
+        if (name === 'Bash') return 'tool-border-Bash';
+        if (['Read', 'Glob', 'Grep'].includes(name)) return 'tool-border-' + name;
+        if (['Write', 'Edit'].includes(name)) return 'tool-border-' + name;
+        if (name === 'Task') return 'tool-border-Task';
+        if (['WebFetch', 'WebSearch'].includes(name)) return 'tool-border-' + name;
+        if (name === 'SendMessage') return 'tool-border-SendMessage';
+        return '';
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatTokens(n) {
+        if (!n) return '0';
+        return n.toLocaleString();
+    }
+
+    function formatTime(ts) {
+        if (!ts) return '';
+        try {
+            var d = new Date(ts);
+            return d.toTimeString().split(' ')[0];
+        } catch(e) { return ''; }
+    }
+
+    function scrollToBottom() {
+        if (autoScrollCb && autoScrollCb.checked) {
+            scrollAnchor.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+
+    function addMessageToTimeline(entry) {
+        var idx = messageIndex++;
+        var div = document.createElement('div');
+        div.className = 'message-block new-entry';
+        div.setAttribute('data-index', idx);
+        div.setAttribute('data-role', entry.role);
+
+        if (entry.role === 'user') {
+            div.innerHTML = '<div class="msg-user bg-claude-surface rounded-xl p-5">'
+                + '<div class="flex items-center justify-between mb-3">'
+                + '<div class="flex items-center gap-2">'
+                + '<span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">User</span>'
+                + '<span class="text-xs text-claude-muted">' + formatTime(entry.timestamp) + '</span>'
+                + '</div></div>'
+                + '<div class="msg-content text-sm text-claude-text">' + escapeHtml(entry.content) + '</div>'
+                + '</div>';
+            totalMsgs++;
+        } else if (entry.role === 'assistant') {
+            var tokensHtml = '';
+            if (entry.input_tokens || entry.output_tokens) {
+                tokensHtml = '<span class="token-badge font-mono">in: ' + formatTokens(entry.input_tokens) + ' | out: ' + formatTokens(entry.output_tokens) + '</span>';
+                totalTokens += (entry.output_tokens || 0);
+            }
+
+            var thinkingHtml = '';
+            if (entry.has_thinking && entry.thinking_text) {
+                thinkingHtml = '<div class="mb-4">'
+                    + '<button onclick="toggleCollapse(\'thinking-live-' + idx + '\')" class="flex items-center gap-2 text-xs text-claude-muted hover:text-claude-text transition-colors mb-1">'
+                    + '<svg id="icon-thinking-live-' + idx + '" class="w-3 h-3 transition-transform" fill="currentColor" viewBox="0 0 20 20"><path d="M6.293 4.293a1 1 0 011.414 0L12 8.586l4.293-4.293a1 1 0 111.414 1.414l-5 5a1 1 0 01-1.414 0l-5-5a1 1 0 010-1.414z"/></svg>'
+                    + '💭 Thinking</button>'
+                    + '<div id="thinking-live-' + idx + '" class="collapsible-body">'
+                    + '<div class="thinking-block rounded-lg p-4 mt-1 text-xs text-claude-muted msg-content max-h-96 overflow-y-auto">' + escapeHtml(entry.thinking_text) + '</div>'
+                    + '</div></div>';
+            }
+
+            var contentHtml = '';
+            if (entry.content) {
+                contentHtml = '<div class="msg-content text-sm text-claude-text mb-4">' + escapeHtml(entry.content) + '</div>';
+            }
+
+            var toolsHtml = '';
+            if (entry.tool_calls && entry.tool_calls.length > 0) {
+                toolsHtml = '<div class="space-y-2 mt-3">';
+                entry.tool_calls.forEach(function(tc, tcIdx) {
+                    var isPending = !tc.output_result;
+                    var borderClass = toolBorderClass(tc.tool_name);
+                    var toolId = 'tool-live-' + idx + '-' + tcIdx;
+
+                    if (isPending && tc.tool_use_id) {
+                        // Store reference so we can update when result comes in
+                        setTimeout(function() {
+                            var el = document.querySelector('[data-tool-id="' + tc.tool_use_id + '"]');
+                            if (el) pendingTools[tc.tool_use_id] = el;
+                        }, 100);
+                    }
+
+                    var statusBadge = isPending
+                        ? '<span class="text-xs text-yellow-400">⏳ running</span>'
+                        : '';
+
+                    var outputHtml = '';
+                    if (tc.output_result) {
+                        outputHtml = '<div class="mt-3"><div class="text-xs text-claude-muted mb-1">Output</div>'
+                            + '<pre class="mt-1 text-xs overflow-x-auto max-h-96 overflow-y-auto"><code>' + escapeHtml(tc.output_result) + '</code></pre></div>';
+                    }
+
+                    toolsHtml += '<div class="tool-card ' + borderClass + ' rounded-lg bg-claude-bg/50 overflow-hidden ' + (isPending ? 'pending-tool' : '') + '" data-tool-id="' + (tc.tool_use_id || '') + '">'
+                        + '<div class="tool-header flex items-center justify-between px-4 py-2.5" onclick="toggleCollapse(\'' + toolId + '\')">'
+                        + '<div class="flex items-center gap-2 min-w-0">'
+                        + '<svg id="icon-' + toolId + '" class="w-3 h-3 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>'
+                        + '<span class="text-sm flex-shrink-0">' + toolEmoji(tc.tool_name) + '</span>'
+                        + '<span class="text-sm font-medium text-claude-text flex-shrink-0">' + escapeHtml(tc.tool_name) + '</span>'
+                        + '<span class="text-xs text-claude-muted truncate">' + escapeHtml(tc.input_params) + '</span>'
+                        + '</div>'
+                        + '<div class="flex items-center gap-2 flex-shrink-0 ml-2">' + statusBadge + '</div>'
+                        + '</div>'
+                        + '<div id="' + toolId + '" class="collapsible-body">'
+                        + '<div class="px-4 pb-3 border-t border-claude-border/30">'
+                        + (tc.input_params_raw ? '<div class="mt-3"><button onclick="toggleCollapse(\'input-' + toolId + '\')" class="text-xs text-claude-muted hover:text-claude-text transition-colors mb-1 flex items-center gap-1"><svg id="icon-input-' + toolId + '" class="w-2.5 h-2.5 transition-transform" fill="currentColor" viewBox="0 0 20 20"><path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/></svg>Input</button><div id="input-' + toolId + '" class="collapsible-body"><pre class="mt-1 text-xs overflow-x-auto max-h-96"><code class="language-json">' + escapeHtml(JSON.stringify(tc.input_params_raw, null, 2)) + '</code></pre></div></div>' : '')
+                        + outputHtml
+                        + '</div></div></div>';
+                });
+                toolsHtml += '</div>';
+            }
+
+            div.innerHTML = '<div class="msg-assistant bg-claude-surface rounded-xl p-5">'
+                + '<div class="flex items-center justify-between mb-3">'
+                + '<div class="flex items-center gap-2">'
+                + '<span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">Assistant</span>'
+                + '<span class="text-xs text-claude-muted">' + formatTime(entry.timestamp) + '</span>'
+                + '</div>' + tokensHtml + '</div>'
+                + thinkingHtml + contentHtml + toolsHtml
+                + '</div>';
+            totalMsgs++;
+        }
+
+        timeline.appendChild(div);
+        updateCounters();
+        scrollToBottom();
+
+        // Highlight new code blocks
+        div.querySelectorAll('pre code').forEach(function(block) {
+            hljs.highlightElement(block);
+        });
+    }
+
+    function handleToolResult(entry) {
+        if (!entry.results) return;
+        entry.results.forEach(function(result) {
+            var el = pendingTools[result.tool_use_id];
+            if (el) {
+                el.classList.remove('pending-tool');
+                // Update the status badge
+                var badge = el.querySelector('.text-yellow-400');
+                if (badge) badge.remove();
+                // Add output to the tool card body
+                var body = el.querySelector('.collapsible-body .border-t');
+                if (body && result.output_result) {
+                    var outputDiv = document.createElement('div');
+                    outputDiv.className = 'mt-3';
+                    outputDiv.innerHTML = '<div class="text-xs text-claude-muted mb-1">Output'
+                        + (result.output_result_full_length > 5000 ? ' <span class="text-claude-muted">(truncated)</span>' : '')
+                        + '</div>'
+                        + '<div class="code-wrapper relative">'
+                        + '<button class="copy-btn absolute top-2 right-2 px-2 py-1 text-xs bg-claude-surface2 text-claude-muted rounded hover:text-claude-text" onclick="copyText(this)">Copy</button>'
+                        + '<pre class="mt-1 text-xs overflow-x-auto max-h-96 overflow-y-auto"><code>' + escapeHtml(result.output_result) + '</code></pre>'
+                        + '</div>';
+                    body.appendChild(outputDiv);
+                }
+                delete pendingTools[result.tool_use_id];
+            }
+        });
+    }
+
+    function updateCounters() {
+        msgCount.textContent = totalMsgs + ' msgs';
+        tokenCount.textContent = formatTokens(totalTokens) + ' tokens out';
+    }
+
+    function setDisconnected(reason) {
+        statusText.textContent = reason || 'Disconnected';
+        statusText.className = 'text-xs text-yellow-400 ml-2';
+        var ping = liveIndicator.querySelector('.animate-ping');
+        if (ping) ping.remove();
+        var dot = liveIndicator.querySelector('.bg-green-500');
+        if (dot) {
+            dot.classList.remove('bg-green-500');
+            dot.classList.add('bg-yellow-500');
+        }
+        document.getElementById('status-bar').classList.remove('border-green-500/30');
+        document.getElementById('status-bar').classList.add('border-yellow-500/30');
+    }
+
+    // SSE connection
+    var projectDir = {{ session.project_dir_name | tojson }};
+    var sessionId = {{ session.session_id | tojson }};
+    var evtSource = null;
+    var reconnectAttempts = 0;
+
+    function connectSSE() {
+        evtSource = new EventSource('/api/session/' + projectDir + '/' + sessionId + '/stream');
+
+        evtSource.onmessage = function(event) {
+            reconnectAttempts = 0;
+            try {
+                var data = JSON.parse(event.data);
+
+                if (data.type === 'init') {
+                    statusText.textContent = 'Connected - streaming...';
+                    return;
+                }
+                if (data.type === 'heartbeat') {
+                    return;
+                }
+                if (data.type === 'timeout') {
+                    setDisconnected('Session idle');
+                    evtSource.close();
+                    return;
+                }
+                if (data.type === 'error') {
+                    return;
+                }
+                if (data.type === 'tool_result') {
+                    handleToolResult(data);
+                    return;
+                }
+                if (data.type === 'message') {
+                    addMessageToTimeline(data);
+                }
+            } catch(e) {
+                console.error('SSE parse error:', e);
+            }
+        };
+
+        evtSource.onerror = function() {
+            evtSource.close();
+            reconnectAttempts++;
+            if (reconnectAttempts < 10) {
+                statusText.textContent = 'Reconnecting...';
+                setTimeout(connectSSE, 3000);
+            } else {
+                setDisconnected('Connection lost');
+            }
+        };
+    }
+
+    connectSSE();
+
+    // Copy button helper
+    window.copyText = function(btn) {
+        var wrapper = btn.closest('.code-wrapper');
+        var code = wrapper.querySelector('code');
+        if (code) {
+            navigator.clipboard.writeText(code.textContent).then(function() {
+                btn.textContent = 'Copied!';
+                setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+            });
+        }
+    };
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.key === 'g') {
+            // Go to bottom
+            scrollAnchor.scrollIntoView({ behavior: 'smooth' });
+        }
+    });
+
+    // Scroll to bottom on load
+    scrollToBottom();
+})();
+</script>
+{% endblock %}

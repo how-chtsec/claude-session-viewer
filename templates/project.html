@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">←</span>All Projects
+</a>
+<div class="mt-2">
+    <a href="/project/{{ project.dir_name }}" class="nav-link active block px-3 py-2 rounded-md text-sm text-claude-text truncate" title="{{ project.name }}">
+        <span class="mr-2">📂</span>{{ project.name }}
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <span class="text-claude-text">{{ project.name }}</span>
+    </div>
+
+    <!-- Project header -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-claude-text">{{ project.name }}</h1>
+                <p class="text-sm text-claude-muted mt-1 font-mono" title="{{ project.original_path }}">
+                    {{ project.original_path or project.path }}
+                </p>
+            </div>
+            <div class="flex gap-4">
+                <div class="stat-card rounded-lg px-4 py-2 text-center">
+                    <div class="text-2xl font-bold text-claude-text">{{ project.session_count }}</div>
+                    <div class="text-xs text-claude-muted">Sessions</div>
+                </div>
+                <div class="stat-card rounded-lg px-4 py-2 text-center">
+                    <div class="text-sm font-medium text-claude-text" title="{{ project.last_active }}">{{ project.last_active | time_ago }}</div>
+                    <div class="text-xs text-claude-muted">Last Active</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token usage for this project -->
+        {% set proj_input = sessions | sum(attribute='total_input_tokens') %}
+        {% set proj_output = sessions | sum(attribute='total_output_tokens') %}
+        {% set proj_cache_read = sessions | sum(attribute='total_cache_read_tokens') %}
+        {% set proj_cache_write = sessions | sum(attribute='total_cache_creation_tokens') %}
+        {% set proj_total = proj_input + proj_output + proj_cache_read + proj_cache_write %}
+        {% if proj_total > 0 %}
+        <div class="pt-4 border-t border-claude-border/50">
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div>
+                    <div class="text-claude-muted text-xs mb-0.5">Input</div>
+                    <div class="text-sm font-semibold text-blue-400 font-mono" title="{{ proj_input | format_tokens }}">{{ proj_input | compact_tokens }}</div>
+                </div>
+                <div>
+                    <div class="text-claude-muted text-xs mb-0.5">Output</div>
+                    <div class="text-sm font-semibold text-green-400 font-mono" title="{{ proj_output | format_tokens }}">{{ proj_output | compact_tokens }}</div>
+                </div>
+                <div>
+                    <div class="text-claude-muted text-xs mb-0.5">Cache Read</div>
+                    <div class="text-sm font-semibold text-yellow-400 font-mono" title="{{ proj_cache_read | format_tokens }}">{{ proj_cache_read | compact_tokens }}</div>
+                </div>
+                <div>
+                    <div class="text-claude-muted text-xs mb-0.5">Cache Write</div>
+                    <div class="text-sm font-semibold text-purple-400 font-mono" title="{{ proj_cache_write | format_tokens }}">{{ proj_cache_write | compact_tokens }}</div>
+                </div>
+                <div>
+                    <div class="text-claude-muted text-xs mb-0.5">Total</div>
+                    <div class="text-sm font-semibold text-claude-text font-mono" title="{{ proj_total | format_tokens }}">{{ proj_total | compact_tokens }}</div>
+                </div>
+            </div>
+            <div class="flex rounded-full h-2 overflow-hidden bg-claude-bg mt-3">
+                {% if proj_input > 0 %}<div class="bg-blue-500" style="width: {{ (proj_input / proj_total * 100) }}%" title="Input: {{ proj_input | compact_tokens }}"></div>{% endif %}
+                {% if proj_output > 0 %}<div class="bg-green-500" style="width: {{ (proj_output / proj_total * 100) }}%" title="Output: {{ proj_output | compact_tokens }}"></div>{% endif %}
+                {% if proj_cache_read > 0 %}<div class="bg-yellow-500/70" style="width: {{ (proj_cache_read / proj_total * 100) }}%" title="Cache Read: {{ proj_cache_read | compact_tokens }}"></div>{% endif %}
+                {% if proj_cache_write > 0 %}<div class="bg-purple-500/70" style="width: {{ (proj_cache_write / proj_total * 100) }}%" title="Cache Write: {{ proj_cache_write | compact_tokens }}"></div>{% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Sessions list -->
+    <h2 class="text-lg font-semibold text-claude-text mb-4">Sessions</h2>
+
+    {% if sessions %}
+    <div class="space-y-3">
+        {% for s in sessions %}
+        <a href="/session/{{ project.dir_name }}/{{ s.session_id }}" class="block bg-claude-surface rounded-xl border border-claude-border p-5 hover:border-claude-accent transition-all group">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <h3 class="font-semibold text-claude-text group-hover:text-claude-accent2 transition-colors truncate">
+                            {{ s.slug or s.session_id[:12] }}
+                        </h3>
+                        {% if s.agent_name %}
+                        <span class="px-1.5 py-0.5 text-xs bg-yellow-500/15 text-yellow-300 rounded flex-shrink-0 hover:bg-yellow-500/25 transition-colors cursor-pointer" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/team/{{ s.team_name }}/member/{{ s.agent_name }}';" title="Team: {{ s.team_name }}">{{ s.agent_name }}</span>
+                        {% endif %}
+                        {% if s.has_subagents %}
+                        <span class="px-1.5 py-0.5 text-xs bg-purple-500/20 text-purple-300 rounded flex-shrink-0">🤖 subagents</span>
+                        {% endif %}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-3 text-xs text-claude-muted">
+                        <span title="{{ s.start_time }}">{{ s.start_time | time_ago }}</span>
+                        {% if s.model %}
+                        <span class="px-2 py-0.5 rounded-full bg-claude-surface2">{{ s.model }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 text-sm flex-shrink-0">
+                    <div class="text-center">
+                        <div class="font-semibold text-claude-text">{{ s.message_count }}</div>
+                        <div class="text-xs text-claude-muted">messages</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="font-semibold text-claude-text">{{ s.tool_call_count }}</div>
+                        <div class="text-xs text-claude-muted">tools</div>
+                    </div>
+                    <div class="text-center" title="Input: {{ s.total_input_tokens | format_tokens }}&#10;Output: {{ s.total_output_tokens | format_tokens }}&#10;Cache: {{ s.total_cache_read_tokens | format_tokens }}">
+                        <div class="font-semibold text-claude-text font-mono text-xs">{{ s.total_input_tokens | compact_tokens }} / {{ s.total_output_tokens | compact_tokens }}</div>
+                        <div class="text-xs text-claude-muted">in / out</div>
+                    </div>
+                    <svg class="w-5 h-5 text-claude-muted group-hover:text-claude-accent2 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-8 text-center">
+        <p class="text-claude-muted">No sessions found for this project.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

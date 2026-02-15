@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Claude Viewer{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        claude: {
+                            bg: '#0f0e17',
+                            surface: '#1a1a2e',
+                            surface2: '#232340',
+                            border: '#2d2b55',
+                            accent: '#7c3aed',
+                            accent2: '#a78bfa',
+                            text: '#e2e0f0',
+                            muted: '#8b89a6',
+                            user: '#0d9488',
+                            assistant: '#7c3aed',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: #0f0e17;
+            color: #e2e0f0;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+        code, pre, .font-mono {
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: #3d3b65; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #5a578a; }
+
+        .fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+        .collapsible-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, padding 0.3s ease-out;
+        }
+        .collapsible-body.expanded {
+            max-height: 50000px;
+            transition: max-height 0.5s ease-in;
+        }
+
+        .nav-link {
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .nav-link:hover {
+            background: rgba(124, 58, 237, 0.15);
+            color: #a78bfa;
+        }
+        .nav-link.active {
+            background: rgba(124, 58, 237, 0.2);
+            color: #a78bfa;
+            border-left: 3px solid #7c3aed;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #232340 100%);
+            border: 1px solid #2d2b55;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .stat-card:hover {
+            border-color: #7c3aed;
+            transform: translateY(-1px);
+        }
+
+        .tool-border-Bash { border-left-color: #22c55e !important; }
+        .tool-border-Read, .tool-border-Glob, .tool-border-Grep { border-left-color: #3b82f6 !important; }
+        .tool-border-Write, .tool-border-Edit { border-left-color: #f97316 !important; }
+        .tool-border-Task { border-left-color: #a855f7 !important; }
+        .tool-border-WebFetch, .tool-border-WebSearch { border-left-color: #06b6d4 !important; }
+        .tool-border-SendMessage { border-left-color: #eab308 !important; }
+
+        pre code.hljs { background: #0f0e17 !important; border-radius: 6px; }
+        .mobile-menu-open { transform: translateX(0) !important; }
+
+        /* Sidebar resize handle */
+        #sidebar-resize {
+            position: absolute;
+            top: 0;
+            right: -3px;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 40;
+            transition: background-color 0.15s;
+        }
+        #sidebar-resize:hover,
+        #sidebar-resize.active {
+            background: #7c3aed;
+        }
+        body.sidebar-resizing {
+            cursor: col-resize !important;
+            user-select: none !important;
+        }
+        body.sidebar-resizing * {
+            cursor: col-resize !important;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen">
+    <!-- Mobile menu overlay -->
+    <div id="mobile-overlay" class="fixed inset-0 bg-black/50 z-30 hidden lg:hidden" onclick="toggleMobileMenu()"></div>
+
+    <!-- Top navbar -->
+    <nav class="fixed top-0 left-0 right-0 z-20 bg-claude-surface/95 backdrop-blur border-b border-claude-border h-14 flex items-center px-4">
+        <button class="lg:hidden mr-3 text-claude-muted hover:text-claude-text" onclick="toggleMobileMenu()">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+        </button>
+        <a href="/" class="flex items-center gap-2 text-lg font-semibold text-claude-text hover:text-claude-accent2 transition-colors">
+            <svg class="w-6 h-6 text-claude-accent" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            Claude Viewer
+        </a>
+        <div class="ml-auto flex items-center gap-4">
+            <a href="/" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors">Dashboard</a>
+            <a href="/usage" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                </svg>
+                Usage
+            </a>
+            <a href="/teams" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Teams
+            </a>
+            <a href="/live" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+                <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                Live
+            </a>
+            <a href="/monitor" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+                </svg>
+                Monitor
+            </a>
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="fixed top-14 left-0 bottom-0 bg-claude-surface border-r border-claude-border z-30 overflow-y-auto transform -translate-x-full lg:translate-x-0 transition-transform duration-200" style="width: 256px;">
+        <div class="p-4">
+            <h3 class="text-xs font-semibold text-claude-muted uppercase tracking-wider mb-3">Projects</h3>
+            <nav class="space-y-1" id="project-nav">
+                {% block sidebar %}
+                <p class="text-xs text-claude-muted px-3 py-2">Loading...</p>
+                {% endblock %}
+            </nav>
+        </div>
+        <!-- Resize handle -->
+        <div id="sidebar-resize" class="hidden lg:block"></div>
+    </aside>
+
+    <!-- Main content -->
+    <main id="main-content" class="pt-14 min-h-screen" style="margin-left: 256px;">
+        <div class="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <script>
+        function toggleMobileMenu() {
+            var sidebar = document.getElementById('sidebar');
+            var overlay = document.getElementById('mobile-overlay');
+            sidebar.classList.toggle('mobile-menu-open');
+            overlay.classList.toggle('hidden');
+        }
+
+        function toggleCollapse(id) {
+            var el = document.getElementById(id);
+            var icon = document.getElementById('icon-' + id);
+            if (el) {
+                el.classList.toggle('expanded');
+                if (icon) {
+                    icon.style.transform = el.classList.contains('expanded') ? 'rotate(90deg)' : 'rotate(0deg)';
+                }
+            }
+        }
+
+        // Initialize highlight.js
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('pre code').forEach(function(block) {
+                hljs.highlightElement(block);
+            });
+        });
+
+        // --- Resizable sidebar ---
+        (function() {
+            var sidebar = document.getElementById('sidebar');
+            var main = document.getElementById('main-content');
+            var handle = document.getElementById('sidebar-resize');
+            var MIN_W = 180;
+            var MAX_W = 500;
+            var STORAGE_KEY = 'claude-viewer-sidebar-width';
+
+            // Restore saved width
+            var saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                var w = parseInt(saved, 10);
+                if (w >= MIN_W && w <= MAX_W) {
+                    applySidebarWidth(w);
+                }
+            }
+
+            // On mobile, keep main margin at 0
+            function isMobile() {
+                return window.innerWidth < 1024;
+            }
+
+            function applySidebarWidth(w) {
+                sidebar.style.width = w + 'px';
+                if (!isMobile()) {
+                    main.style.marginLeft = w + 'px';
+                }
+            }
+
+            // Drag logic
+            var dragging = false;
+            var startX = 0;
+            var startW = 0;
+
+            handle.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                dragging = true;
+                startX = e.clientX;
+                startW = sidebar.offsetWidth;
+                handle.classList.add('active');
+                document.body.classList.add('sidebar-resizing');
+                // Disable transition while dragging
+                sidebar.style.transition = 'none';
+                main.style.transition = 'none';
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                var newW = startW + (e.clientX - startX);
+                if (newW < MIN_W) newW = MIN_W;
+                if (newW > MAX_W) newW = MAX_W;
+                applySidebarWidth(newW);
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (!dragging) return;
+                dragging = false;
+                handle.classList.remove('active');
+                document.body.classList.remove('sidebar-resizing');
+                sidebar.style.transition = '';
+                main.style.transition = '';
+                // Save width
+                localStorage.setItem(STORAGE_KEY, sidebar.offsetWidth.toString());
+            });
+
+            // Handle window resize: hide main margin on mobile
+            var resizeTimer;
+            window.addEventListener('resize', function() {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(function() {
+                    if (isMobile()) {
+                        main.style.marginLeft = '0';
+                    } else {
+                        main.style.marginLeft = sidebar.style.width;
+                    }
+                }, 100);
+            });
+
+            // Double-click to reset to default
+            handle.addEventListener('dblclick', function() {
+                applySidebarWidth(256);
+                localStorage.removeItem(STORAGE_KEY);
+            });
+
+            // Initial mobile check
+            if (isMobile()) {
+                main.style.marginLeft = '0';
+            }
+        })();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

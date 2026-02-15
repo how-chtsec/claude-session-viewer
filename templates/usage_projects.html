@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}Project Token Comparison - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/usage" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">←</span>Token Usage
+</a>
+<div class="mt-3 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Projects</div>
+    {% for p in project_stats[:15] %}
+    <a href="/project/{{ p.dir_name }}" class="block px-2 py-1 text-xs text-claude-text truncate rounded hover:bg-claude-surface2 transition-colors" title="{{ p.name }}">
+        {{ p.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .bar-row { transition: background-color 0.15s; }
+    .bar-row:hover { background: rgba(124, 58, 237, 0.06); }
+    .bar-segment { transition: width 0.5s ease-out; min-width: 0; }
+    .rank-badge {
+        width: 24px; height: 24px; border-radius: 50%;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 0.65rem; font-weight: 700; flex-shrink: 0;
+    }
+    .rank-1 { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; }
+    .rank-2 { background: linear-gradient(135deg, #9ca3af, #6b7280); color: #fff; }
+    .rank-3 { background: linear-gradient(135deg, #b45309, #92400e); color: #fff; }
+    .rank-other { background: rgba(139, 137, 166, 0.15); color: #8b89a6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <a href="/usage" class="hover:text-claude-accent2 transition-colors">Token Usage</a>
+        <span>/</span>
+        <span class="text-claude-text">Project Comparison</span>
+    </div>
+
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold text-claude-text">Project Token Comparison</h1>
+        <p class="text-claude-muted text-sm mt-1">Compare token consumption across all {{ project_stats | length }} projects</p>
+    </div>
+
+    {% if project_stats %}
+    {% set max_total = project_stats[0].grand_total if project_stats[0].grand_total > 0 else 1 %}
+    {% set max_output = project_stats | map(attribute='total_output') | max or 1 %}
+
+    <!-- Sort controls -->
+    <div class="flex items-center gap-2 mb-6 text-sm">
+        <span class="text-claude-muted">Sort by:</span>
+        <button onclick="sortProjects('total')" id="sort-total" class="px-3 py-1.5 rounded-lg bg-claude-accent/20 text-claude-accent2 text-xs font-medium transition-colors">Total Tokens</button>
+        <button onclick="sortProjects('output')" id="sort-output" class="px-3 py-1.5 rounded-lg bg-claude-surface2 text-claude-muted text-xs font-medium hover:text-claude-text transition-colors">Output</button>
+        <button onclick="sortProjects('sessions')" id="sort-sessions" class="px-3 py-1.5 rounded-lg bg-claude-surface2 text-claude-muted text-xs font-medium hover:text-claude-text transition-colors">Sessions</button>
+        <button onclick="sortProjects('messages')" id="sort-messages" class="px-3 py-1.5 rounded-lg bg-claude-surface2 text-claude-muted text-xs font-medium hover:text-claude-text transition-colors">Messages</button>
+    </div>
+
+    <!-- Visual bar chart comparison -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden mb-8">
+        <div class="px-5 py-3 border-b border-claude-border flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-claude-text">Token Usage by Project</h2>
+            <div class="flex gap-4 text-xs text-claude-muted">
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded bg-blue-500"></span>Input</span>
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded bg-green-500"></span>Output</span>
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded bg-yellow-500/70"></span>Cache Read</span>
+                <span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded bg-purple-500/70"></span>Cache Write</span>
+            </div>
+        </div>
+
+        <div id="bar-chart" class="divide-y divide-claude-border/30">
+            {% for p in project_stats %}
+            <div class="bar-row px-5 py-3 flex items-center gap-4"
+                 data-total="{{ p.grand_total }}"
+                 data-output="{{ p.total_output }}"
+                 data-sessions="{{ p.session_count }}"
+                 data-messages="{{ p.total_messages }}"
+                 data-name="{{ p.name }}">
+                <!-- Rank -->
+                <span class="rank-badge {% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% else %}rank-other{% endif %}">
+                    {{ loop.index }}
+                </span>
+
+                <!-- Project info -->
+                <div class="w-40 flex-shrink-0 min-w-0">
+                    <a href="/usage/project/{{ p.dir_name }}" class="text-sm font-medium text-claude-text hover:text-claude-accent2 transition-colors truncate block">
+                        {{ p.name }}
+                    </a>
+                    <div class="text-xs text-claude-muted">
+                        {{ p.session_count }} sessions
+                    </div>
+                </div>
+
+                <!-- Bar -->
+                <div class="flex-1 min-w-0">
+                    {% set bar_width = (p.grand_total / max_total * 100) if max_total > 0 else 0 %}
+                    <div class="flex rounded h-6 overflow-hidden bg-claude-bg" style="width: {{ bar_width }}%; min-width: 4px;">
+                        {% if p.total_input > 0 %}
+                        <div class="bar-segment bg-blue-500 h-full" style="width: {{ (p.total_input / p.grand_total * 100) if p.grand_total > 0 else 0 }}%" title="Input: {{ p.total_input | format_tokens }}"></div>
+                        {% endif %}
+                        {% if p.total_output > 0 %}
+                        <div class="bar-segment bg-green-500 h-full" style="width: {{ (p.total_output / p.grand_total * 100) if p.grand_total > 0 else 0 }}%" title="Output: {{ p.total_output | format_tokens }}"></div>
+                        {% endif %}
+                        {% if p.total_cache_read > 0 %}
+                        <div class="bar-segment bg-yellow-500/70 h-full" style="width: {{ (p.total_cache_read / p.grand_total * 100) if p.grand_total > 0 else 0 }}%" title="Cache Read: {{ p.total_cache_read | format_tokens }}"></div>
+                        {% endif %}
+                        {% if p.total_cache_write > 0 %}
+                        <div class="bar-segment bg-purple-500/70 h-full" style="width: {{ (p.total_cache_write / p.grand_total * 100) if p.grand_total > 0 else 0 }}%" title="Cache Write: {{ p.total_cache_write | format_tokens }}"></div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Total -->
+                <div class="w-20 text-right flex-shrink-0">
+                    <div class="text-sm font-semibold text-claude-text font-mono" title="{{ p.grand_total | format_tokens }}">{{ p.grand_total | compact_tokens }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Detailed table -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden mb-8">
+        <div class="px-5 py-3 border-b border-claude-border">
+            <h2 class="text-sm font-semibold text-claude-text">Detailed Breakdown</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-claude-border text-claude-muted text-xs uppercase tracking-wider">
+                        <th class="text-left px-4 py-3 font-medium">#</th>
+                        <th class="text-left px-4 py-3 font-medium">Project</th>
+                        <th class="text-right px-4 py-3 font-medium">Sessions</th>
+                        <th class="text-right px-4 py-3 font-medium">Messages</th>
+                        <th class="text-right px-4 py-3 font-medium">Tools</th>
+                        <th class="text-right px-4 py-3 font-medium">
+                            <span class="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1"></span>Input
+                        </th>
+                        <th class="text-right px-4 py-3 font-medium">
+                            <span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"></span>Output
+                        </th>
+                        <th class="text-right px-4 py-3 font-medium">
+                            <span class="inline-block w-2 h-2 rounded-full bg-yellow-500/70 mr-1"></span>Cache R
+                        </th>
+                        <th class="text-right px-4 py-3 font-medium">
+                            <span class="inline-block w-2 h-2 rounded-full bg-purple-500/70 mr-1"></span>Cache W
+                        </th>
+                        <th class="text-right px-4 py-3 font-medium">Total</th>
+                        <th class="text-left px-4 py-3 font-medium w-32">Distribution</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in project_stats %}
+                    <tr class="border-b border-claude-border/30 hover:bg-claude-surface2/30 transition-colors">
+                        <td class="px-4 py-3">
+                            <span class="rank-badge {% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% else %}rank-other{% endif %}">
+                                {{ loop.index }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <a href="/usage/project/{{ p.dir_name }}" class="text-claude-text hover:text-claude-accent2 transition-colors font-medium">{{ p.name }}</a>
+                            {% if p.last_active %}
+                            <div class="text-xs text-claude-muted mt-0.5">{{ p.last_active | time_ago }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-right text-claude-muted">{{ p.session_count }}</td>
+                        <td class="px-4 py-3 text-right text-claude-muted font-mono text-xs">{{ p.total_messages | format_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-claude-muted font-mono text-xs">{{ p.total_tools | format_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-blue-400 font-mono text-xs" title="{{ p.total_input | format_tokens }}">{{ p.total_input | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-green-400 font-mono text-xs" title="{{ p.total_output | format_tokens }}">{{ p.total_output | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-yellow-400 font-mono text-xs" title="{{ p.total_cache_read | format_tokens }}">{{ p.total_cache_read | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-purple-400 font-mono text-xs" title="{{ p.total_cache_write | format_tokens }}">{{ p.total_cache_write | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-claude-text font-mono text-xs font-semibold" title="{{ p.grand_total | format_tokens }}">{{ p.grand_total | compact_tokens }}</td>
+                        <td class="px-4 py-3">
+                            {% if p.grand_total > 0 %}
+                            <div class="flex rounded-full h-2.5 overflow-hidden bg-claude-bg w-full">
+                                {% if p.total_input > 0 %}<div class="bg-blue-500" style="width: {{ (p.total_input / p.grand_total * 100) }}%"></div>{% endif %}
+                                {% if p.total_output > 0 %}<div class="bg-green-500" style="width: {{ (p.total_output / p.grand_total * 100) }}%"></div>{% endif %}
+                                {% if p.total_cache_read > 0 %}<div class="bg-yellow-500/70" style="width: {{ (p.total_cache_read / p.grand_total * 100) }}%"></div>{% endif %}
+                                {% if p.total_cache_write > 0 %}<div class="bg-purple-500/70" style="width: {{ (p.total_cache_write / p.grand_total * 100) }}%"></div>{% endif %}
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="border-t-2 border-claude-border bg-claude-surface2/30">
+                        <td class="px-4 py-3"></td>
+                        <td class="px-4 py-3 font-semibold text-claude-text">Total</td>
+                        <td class="px-4 py-3 text-right font-semibold text-claude-text">{{ project_stats | sum(attribute='session_count') }}</td>
+                        <td class="px-4 py-3 text-right font-semibold text-claude-text font-mono text-xs">{{ project_stats | sum(attribute='total_messages') | format_tokens }}</td>
+                        <td class="px-4 py-3 text-right font-semibold text-claude-text font-mono text-xs">{{ project_stats | sum(attribute='total_tools') | format_tokens }}</td>
+                        {% set sum_input = project_stats | sum(attribute='total_input') %}
+                        {% set sum_output = project_stats | sum(attribute='total_output') %}
+                        {% set sum_cache_r = project_stats | sum(attribute='total_cache_read') %}
+                        {% set sum_cache_w = project_stats | sum(attribute='total_cache_write') %}
+                        {% set sum_total = sum_input + sum_output + sum_cache_r + sum_cache_w %}
+                        <td class="px-4 py-3 text-right font-semibold text-blue-400 font-mono text-xs" title="{{ sum_input | format_tokens }}">{{ sum_input | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right font-semibold text-green-400 font-mono text-xs" title="{{ sum_output | format_tokens }}">{{ sum_output | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right font-semibold text-yellow-400 font-mono text-xs" title="{{ sum_cache_r | format_tokens }}">{{ sum_cache_r | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right font-semibold text-purple-400 font-mono text-xs" title="{{ sum_cache_w | format_tokens }}">{{ sum_cache_w | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right font-semibold text-claude-text font-mono text-xs" title="{{ sum_total | format_tokens }}">{{ sum_total | compact_tokens }}</td>
+                        <td class="px-4 py-3"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- Output tokens comparison (output-only bar chart) -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden mb-8">
+        <div class="px-5 py-3 border-b border-claude-border">
+            <h2 class="text-sm font-semibold text-claude-text">Output Tokens Comparison</h2>
+            <p class="text-xs text-claude-muted mt-0.5">Actual API output tokens consumed per project</p>
+        </div>
+        <div class="p-5">
+            <div class="space-y-2">
+                {% for p in project_stats %}
+                {% if p.total_output > 0 %}
+                <div class="flex items-center gap-3">
+                    <a href="/usage/project/{{ p.dir_name }}" class="w-36 text-xs text-claude-text truncate hover:text-claude-accent2 transition-colors flex-shrink-0" title="{{ p.name }}">{{ p.name }}</a>
+                    <div class="flex-1 min-w-0">
+                        <div class="bg-claude-bg rounded h-4 overflow-hidden">
+                            <div class="bg-green-500/80 h-full rounded transition-all" style="width: {{ (p.total_output / max_output * 100) }}%; min-width: 2px;"></div>
+                        </div>
+                    </div>
+                    <span class="text-xs text-claude-text font-mono w-16 text-right flex-shrink-0" title="{{ p.total_output | format_tokens }}">{{ p.total_output | compact_tokens }}</span>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% else %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-12 text-center">
+        <p class="text-claude-muted text-lg">No projects found</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function sortProjects(key) {
+    var container = document.getElementById('bar-chart');
+    var rows = Array.from(container.querySelectorAll('.bar-row'));
+
+    rows.sort(function(a, b) {
+        var va = parseFloat(a.getAttribute('data-' + key)) || 0;
+        var vb = parseFloat(b.getAttribute('data-' + key)) || 0;
+        return vb - va;
+    });
+
+    // Re-number ranks
+    rows.forEach(function(row, i) {
+        var badge = row.querySelector('.rank-badge');
+        if (badge) {
+            badge.textContent = i + 1;
+            badge.className = 'rank-badge ' + (i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-other');
+        }
+
+        // Rescale bars based on new max
+        var maxVal = parseFloat(rows[0].getAttribute('data-' + key)) || 1;
+        var val = parseFloat(row.getAttribute('data-' + key)) || 0;
+        var barContainer = row.querySelector('.rounded.h-6');
+        if (barContainer) {
+            barContainer.style.width = (val / maxVal * 100) + '%';
+        }
+
+        container.appendChild(row);
+    });
+
+    // Update button styles
+    ['total', 'output', 'sessions', 'messages'].forEach(function(k) {
+        var btn = document.getElementById('sort-' + k);
+        if (btn) {
+            if (k === key) {
+                btn.className = 'px-3 py-1.5 rounded-lg bg-claude-accent/20 text-claude-accent2 text-xs font-medium transition-colors';
+            } else {
+                btn.className = 'px-3 py-1.5 rounded-lg bg-claude-surface2 text-claude-muted text-xs font-medium hover:text-claude-text transition-colors';
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

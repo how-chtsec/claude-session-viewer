@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Teams - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">←</span>Dashboard
+</a>
+<div class="mt-3 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Teams</div>
+    {% for t in teams %}
+    <a href="/team/{{ t.name }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-text truncate mb-1" title="{{ t.name }}">
+        {% if t.is_active %}
+        <span class="relative inline-flex h-2 w-2 mr-1.5 align-middle">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+        </span>
+        {% else %}
+        <span class="inline-flex h-2 w-2 rounded-full bg-claude-muted/40 mr-1.5 align-middle"></span>
+        {% endif %}
+        {{ t.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold text-claude-text">Teams</h1>
+        <p class="text-claude-muted text-sm mt-1">Agent teams and their task progress</p>
+    </div>
+
+    {% if teams %}
+    <div class="space-y-4">
+        {% for t in teams %}
+        <a href="/team/{{ t.name }}" class="block bg-claude-surface rounded-xl border border-claude-border p-6 hover:border-claude-accent transition-all group">
+            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                    <!-- Team name & status -->
+                    <div class="flex items-center gap-3 mb-2">
+                        {% if t.is_active %}
+                        <span class="relative flex h-2.5 w-2.5 flex-shrink-0">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                        </span>
+                        {% else %}
+                        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-claude-muted/40 flex-shrink-0"></span>
+                        {% endif %}
+                        <h2 class="text-lg font-semibold text-claude-text group-hover:text-claude-accent2 transition-colors truncate">{{ t.name }}</h2>
+                    </div>
+
+                    {% if t.description %}
+                    <p class="text-sm text-claude-muted mb-3 line-clamp-2">{{ t.description }}</p>
+                    {% endif %}
+
+                    <!-- Members row -->
+                    <div class="flex flex-wrap items-center gap-2 mb-3">
+                        {% for m in t.members %}
+                        <span class="px-2 py-1 rounded-lg bg-claude-surface2 text-xs text-claude-text flex items-center gap-1.5">
+                            {% if m.agentType == 'orchestrator' %}
+                            <span class="text-yellow-400">&#9733;</span>
+                            {% else %}
+                            <span class="text-claude-muted">&#9679;</span>
+                            {% endif %}
+                            {{ m.name }}
+                            <span class="text-claude-muted">({{ m.model | replace('claude-', '') | truncate(12, True, '') }})</span>
+                        </span>
+                        {% endfor %}
+                    </div>
+
+                    <!-- Progress bar -->
+                    {% if t.task_counts.total > 0 %}
+                    {% set pct = (t.task_counts.completed / t.task_counts.total * 100) | int %}
+                    <div class="flex items-center gap-3">
+                        <div class="flex-1 h-2 rounded-full bg-claude-bg overflow-hidden max-w-xs">
+                            {% if t.task_counts.completed > 0 %}
+                            <div class="h-full rounded-full bg-green-500 transition-all" style="width: {{ pct }}%"></div>
+                            {% endif %}
+                        </div>
+                        <span class="text-xs text-claude-muted whitespace-nowrap">{{ pct }}%</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Task counts -->
+                <div class="flex items-center gap-4 flex-shrink-0">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-claude-text">{{ t.task_counts.total }}</div>
+                        <div class="text-xs text-claude-muted">tasks</div>
+                    </div>
+                    {% if t.task_counts.in_progress > 0 %}
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-yellow-400">{{ t.task_counts.in_progress }}</div>
+                        <div class="text-xs text-yellow-400/70">running</div>
+                    </div>
+                    {% endif %}
+                    {% if t.task_counts.completed > 0 %}
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-green-400">{{ t.task_counts.completed }}</div>
+                        <div class="text-xs text-green-400/70">done</div>
+                    </div>
+                    {% endif %}
+                    {% if t.task_counts.pending > 0 %}
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-claude-muted">{{ t.task_counts.pending }}</div>
+                        <div class="text-xs text-claude-muted">pending</div>
+                    </div>
+                    {% endif %}
+                    <svg class="w-5 h-5 text-claude-muted group-hover:text-claude-accent2 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-12 text-center">
+        <div class="text-4xl mb-4">&#128101;</div>
+        <p class="text-claude-muted text-lg">No teams found</p>
+        <p class="text-claude-muted text-sm mt-2">Create a team using Claude Code to see it here.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

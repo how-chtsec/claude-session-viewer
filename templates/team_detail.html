@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+{% block title %}{{ team.name }} - Teams - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/teams" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">←</span>All Teams
+</a>
+<div class="mt-3">
+    <a href="/team/{{ team.name }}" class="nav-link active block px-3 py-2 rounded-md text-sm text-claude-text truncate" title="{{ team.name }}">
+        {% if team.is_active %}
+        <span class="relative inline-flex h-2 w-2 mr-1.5 align-middle">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+        </span>
+        {% endif %}
+        {{ team.name }}
+    </a>
+</div>
+<div class="mt-3 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Members</div>
+    {% for m in team.members %}
+    <a href="/team/{{ team.name }}/member/{{ m.name }}" class="block px-3 py-1.5 text-xs text-claude-text flex items-center gap-1.5 rounded hover:bg-claude-surface2 transition-colors">
+        {% if m.agent_type == 'orchestrator' %}
+        <span class="text-yellow-400">&#9733;</span>
+        {% else %}
+        <span class="text-purple-400">&#9679;</span>
+        {% endif %}
+        {{ m.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    /* Task card styles */
+    .task-card {
+        border: 1px solid #2d2b55;
+        border-radius: 8px;
+        padding: 12px 16px;
+        background: #1a1a2e;
+        transition: border-color 0.2s, transform 0.15s;
+        position: relative;
+        min-width: 220px;
+    }
+    .task-card:hover { border-color: #7c3aed; transform: translateY(-1px); }
+    .task-card.status-pending { border-left: 3px solid #6b7280; }
+    .task-card.status-in_progress { border-left: 3px solid #eab308; }
+    .task-card.status-completed { border-left: 3px solid #22c55e; }
+
+    .status-dot-pending { background: #6b7280; }
+    .status-dot-in_progress { background: #eab308; animation: pulse 2s infinite; }
+    .status-dot-completed { background: #22c55e; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* DAG connector lines */
+    .dag-container {
+        position: relative;
+        overflow-x: auto;
+    }
+    .dag-column {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-width: 260px;
+        flex-shrink: 0;
+    }
+    .dag-row {
+        display: flex;
+        gap: 40px;
+        align-items: flex-start;
+    }
+    .dag-arrow {
+        position: absolute;
+        pointer-events: none;
+    }
+
+    /* Member card */
+    .member-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #232340 100%);
+        border: 1px solid #2d2b55;
+        border-radius: 8px;
+        padding: 16px;
+        transition: border-color 0.2s;
+    }
+    .member-card:hover { border-color: #7c3aed; }
+
+    .task-expanded {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease-out;
+    }
+    .task-expanded.expanded {
+        max-height: 1000px;
+        transition: max-height 0.5s ease-in;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <a href="/teams" class="hover:text-claude-accent2 transition-colors">Teams</a>
+        <span>/</span>
+        <span class="text-claude-text">{{ team.name }}</span>
+    </div>
+
+    <!-- Team header -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+            <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                    {% if team.is_active %}
+                    <span class="relative flex h-3 w-3 flex-shrink-0">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                    </span>
+                    {% endif %}
+                    <h1 class="text-xl font-bold text-claude-text">{{ team.name }}</h1>
+                    {% if team.is_active %}
+                    <span class="px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 text-xs font-medium">ACTIVE</span>
+                    {% endif %}
+                </div>
+                {% if team.description %}
+                <p class="text-sm text-claude-muted mb-2">{{ team.description }}</p>
+                {% endif %}
+                <div class="flex flex-wrap items-center gap-3 text-xs text-claude-muted">
+                    {% if team.created_at %}
+                    <span>Created: {{ team.created_at | ms_to_datetime }}</span>
+                    {% endif %}
+                    {% if team.lead_session_id %}
+                    <span class="font-mono">Lead session: {{ team.lead_session_id[:8] }}...</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="flex items-center gap-4 flex-shrink-0">
+                <div class="text-center">
+                    <div class="text-3xl font-bold text-claude-text">{{ team.progress_pct }}%</div>
+                    <div class="text-xs text-claude-muted">complete</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress bar -->
+        {% if team.task_counts.total > 0 %}
+        <div class="mb-4">
+            <div class="flex rounded-full h-3 overflow-hidden bg-claude-bg">
+                {% if team.task_counts.completed > 0 %}
+                <div class="bg-green-500" style="width: {{ (team.task_counts.completed / team.task_counts.total * 100) }}%" title="Completed: {{ team.task_counts.completed }}"></div>
+                {% endif %}
+                {% if team.task_counts.in_progress > 0 %}
+                <div class="bg-yellow-500" style="width: {{ (team.task_counts.in_progress / team.task_counts.total * 100) }}%" title="In Progress: {{ team.task_counts.in_progress }}"></div>
+                {% endif %}
+                {% if team.task_counts.pending > 0 %}
+                <div class="bg-gray-600" style="width: {{ (team.task_counts.pending / team.task_counts.total * 100) }}%" title="Pending: {{ team.task_counts.pending }}"></div>
+                {% endif %}
+            </div>
+            <div class="flex gap-4 mt-2 text-xs text-claude-muted">
+                <span><span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"></span>Completed: {{ team.task_counts.completed }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1"></span>In Progress: {{ team.task_counts.in_progress }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full bg-gray-600 mr-1"></span>Pending: {{ team.task_counts.pending }}</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Members section -->
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold text-claude-text mb-4">Members ({{ team.members | length }})</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {% for m in team.members %}
+            <a href="/team/{{ team.name }}/member/{{ m.name }}" class="member-card block cursor-pointer group">
+                <div class="flex items-center gap-2 mb-2">
+                    {% if m.agent_type == 'orchestrator' %}
+                    <span class="text-yellow-400 text-lg">&#9733;</span>
+                    {% else %}
+                    <span class="text-purple-400 text-lg">&#9679;</span>
+                    {% endif %}
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm font-semibold text-claude-text group-hover:text-claude-accent2 transition-colors">{{ m.name }}</div>
+                        <div class="text-xs text-claude-muted">{{ m.agent_type }}</div>
+                    </div>
+                    <svg class="w-4 h-4 text-claude-muted/30 group-hover:text-claude-accent2 transition-colors flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                    </svg>
+                </div>
+                <div class="space-y-1.5 text-xs text-claude-muted">
+                    <div class="flex items-center gap-2">
+                        <span class="text-claude-muted/60 w-12">Model</span>
+                        <span class="px-1.5 py-0.5 rounded bg-claude-surface2 text-claude-text">{{ m.model | replace('claude-', '') }}</span>
+                    </div>
+                    {% if m.cwd %}
+                    <div class="flex items-center gap-2">
+                        <span class="text-claude-muted/60 w-12">CWD</span>
+                        <span class="font-mono truncate" title="{{ m.cwd }}">{{ m.cwd }}</span>
+                    </div>
+                    {% endif %}
+                    {% if m.assigned_tasks %}
+                    <div class="flex items-center gap-2">
+                        <span class="text-claude-muted/60 w-12">Tasks</span>
+                        <div class="flex gap-1 flex-wrap">
+                            {% for tid in m.assigned_tasks %}
+                            <span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">#{{ tid }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if m.joined_at %}
+                    <div class="flex items-center gap-2">
+                        <span class="text-claude-muted/60 w-12">Joined</span>
+                        <span>{{ m.joined_at | ms_to_datetime }}</span>
+                    </div>
+                    {% endif %}
+                    {% if m.prompt %}
+                    <div class="mt-2 pt-2 border-t border-claude-border/30">
+                        <span class="text-claude-muted/60 text-xs">Prompt:</span>
+                        <div class="text-xs text-claude-text/70 mt-0.5 line-clamp-2" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ m.prompt }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Task Dependency Graph (DAG) -->
+    {% if team.tasks %}
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold text-claude-text mb-4">Task Flow</h2>
+        <div class="bg-claude-surface rounded-xl border border-claude-border p-6 overflow-x-auto">
+            <div id="dag" class="dag-container">
+                <svg id="dag-svg" class="absolute inset-0 pointer-events-none" style="z-index:0;"></svg>
+                <div class="dag-row relative" style="z-index:1;">
+                    {% for depth in range(team.max_depth + 1) %}
+                    <div class="dag-column">
+                        <div class="text-xs text-claude-muted uppercase tracking-wider mb-2 text-center">
+                            {% if depth == 0 %}Start{% elif depth == team.max_depth %}End{% else %}Phase {{ depth }}{% endif %}
+                        </div>
+                        {% for task in team.tasks %}
+                        {% if task.depth == depth %}
+                        <div class="task-card status-{{ task.status }}" id="task-{{ task.id }}"
+                             data-id="{{ task.id }}" data-depth="{{ task.depth }}"
+                             data-blocks="{{ task.blocks | tojson }}"
+                             data-blocked-by="{{ task.blockedBy | tojson }}">
+                            <div class="flex items-start justify-between gap-2 mb-1.5">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <span class="inline-flex h-2.5 w-2.5 rounded-full flex-shrink-0 status-dot-{{ task.status }}"
+                                          title="{{ task.status }}"></span>
+                                    <span class="text-xs font-mono text-claude-muted">#{{ task.id }}</span>
+                                </div>
+                                {% if task.owner %}
+                                <span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-xs flex-shrink-0">{{ task.owner }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="text-sm font-medium text-claude-text mb-1 cursor-pointer" onclick="toggleTaskDetail('{{ task.id }}')">
+                                {{ task.subject }}
+                            </div>
+                            {% if task.activeForm and task.status == 'in_progress' %}
+                            <div class="text-xs text-yellow-400/80 flex items-center gap-1 mb-1">
+                                <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                {{ task.activeForm }}
+                            </div>
+                            {% endif %}
+                            <!-- Dependency badges -->
+                            <div class="flex flex-wrap gap-1 mt-1.5">
+                                {% if task.blockedBy %}
+                                {% for bid in task.blockedBy %}
+                                <span class="px-1 py-0.5 rounded text-xs bg-red-500/10 text-red-400/80 font-mono">&#8592;#{{ bid }}</span>
+                                {% endfor %}
+                                {% endif %}
+                                {% if task.blocks %}
+                                {% for bid in task.blocks %}
+                                <span class="px-1 py-0.5 rounded text-xs bg-blue-500/10 text-blue-400/80 font-mono">&#8594;#{{ bid }}</span>
+                                {% endfor %}
+                                {% endif %}
+                            </div>
+                            <!-- Expandable description -->
+                            <div id="task-detail-{{ task.id }}" class="task-expanded">
+                                {% if task.description %}
+                                <div class="mt-3 pt-3 border-t border-claude-border/30 text-xs text-claude-muted msg-content" style="white-space:pre-wrap;line-height:1.5;">{{ task.description }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task List (flat) -->
+    <div>
+        <h2 class="text-lg font-semibold text-claude-text mb-4">All Tasks ({{ team.tasks | length }})</h2>
+        <div class="space-y-2">
+            {% for task in team.tasks %}
+            <div class="bg-claude-surface rounded-xl border border-claude-border p-4 cursor-pointer hover:border-claude-accent/50 transition-all"
+                 onclick="toggleTaskDetail('flat-{{ task.id }}')">
+                <div class="flex items-center gap-3">
+                    <!-- Status icon -->
+                    <div class="flex-shrink-0">
+                        {% if task.status == 'completed' %}
+                        <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        {% elif task.status == 'in_progress' %}
+                        <svg class="w-5 h-5 text-yellow-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        {% else %}
+                        <svg class="w-5 h-5 text-claude-muted/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        {% endif %}
+                    </div>
+
+                    <!-- Task info -->
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-0.5">
+                            <span class="text-xs font-mono text-claude-muted">#{{ task.id }}</span>
+                            <span class="text-sm font-medium text-claude-text">{{ task.subject }}</span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 text-xs text-claude-muted">
+                            <span class="px-1.5 py-0.5 rounded
+                                {% if task.status == 'completed' %}bg-green-500/15 text-green-400
+                                {% elif task.status == 'in_progress' %}bg-yellow-500/15 text-yellow-400
+                                {% else %}bg-gray-500/15 text-gray-400{% endif %}">
+                                {{ task.status | replace('_', ' ') }}
+                            </span>
+                            {% if task.owner %}
+                            <span class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300">{{ task.owner }}</span>
+                            {% endif %}
+                            {% if task.blockedBy %}
+                            <span class="text-red-400/70">blocked by: {{ task.blockedBy | join(', #') | replace(',', ', #') }}</span>
+                            {% endif %}
+                            {% if task.blocks %}
+                            <span class="text-blue-400/70">blocks: #{{ task.blocks | join(', #') }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- Chevron -->
+                    <svg id="icon-flat-{{ task.id }}" class="w-4 h-4 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                    </svg>
+                </div>
+
+                <!-- Expandable detail -->
+                <div id="task-detail-flat-{{ task.id }}" class="task-expanded">
+                    {% if task.description %}
+                    <div class="mt-3 pt-3 border-t border-claude-border/30 text-xs text-claude-muted" style="white-space:pre-wrap;line-height:1.6;">{{ task.description }}</div>
+                    {% endif %}
+                    {% if task.activeForm %}
+                    <div class="mt-2 text-xs text-claude-muted">
+                        <span class="text-claude-muted/60">Active form:</span> {{ task.activeForm }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-12 text-center">
+        <p class="text-claude-muted">No tasks found for this team.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleTaskDetail(id) {
+        var el = document.getElementById('task-detail-' + id);
+        var icon = document.getElementById('icon-flat-' + id);
+        if (el) {
+            el.classList.toggle('expanded');
+            if (icon) {
+                icon.style.transform = el.classList.contains('expanded') ? 'rotate(90deg)' : 'rotate(0deg)';
+            }
+        }
+    }
+
+    // Draw SVG arrows between connected tasks in the DAG
+    function drawDagArrows() {
+        var svg = document.getElementById('dag-svg');
+        var dagContainer = document.getElementById('dag');
+        if (!svg || !dagContainer) return;
+
+        var containerRect = dagContainer.getBoundingClientRect();
+        svg.setAttribute('width', dagContainer.scrollWidth);
+        svg.setAttribute('height', dagContainer.scrollHeight);
+        svg.style.width = dagContainer.scrollWidth + 'px';
+        svg.style.height = dagContainer.scrollHeight + 'px';
+
+        // Clear existing
+        svg.innerHTML = '';
+
+        // Add arrowhead marker
+        var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        var marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrowhead');
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '6');
+        marker.setAttribute('refX', '8');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+        var polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', '0 0, 8 3, 0 6');
+        polygon.setAttribute('fill', '#4b5563');
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+
+        // Draw lines from each task to tasks it blocks
+        var taskCards = document.querySelectorAll('.task-card[data-id]');
+        taskCards.forEach(function(card) {
+            var blocks = JSON.parse(card.getAttribute('data-blocks') || '[]');
+            if (!blocks.length) return;
+
+            var fromRect = card.getBoundingClientRect();
+            var fromX = fromRect.right - containerRect.left;
+            var fromY = fromRect.top + fromRect.height / 2 - containerRect.top;
+
+            blocks.forEach(function(targetId) {
+                var targetCard = document.getElementById('task-' + targetId);
+                if (!targetCard) return;
+
+                var toRect = targetCard.getBoundingClientRect();
+                var toX = toRect.left - containerRect.left;
+                var toY = toRect.top + toRect.height / 2 - containerRect.top;
+
+                var line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                // Curved path
+                var midX = (fromX + toX) / 2;
+                var d = 'M ' + fromX + ' ' + fromY + ' C ' + midX + ' ' + fromY + ', ' + midX + ' ' + toY + ', ' + toX + ' ' + toY;
+                line.setAttribute('d', d);
+                line.setAttribute('fill', 'none');
+                line.setAttribute('stroke', '#4b5563');
+                line.setAttribute('stroke-width', '1.5');
+                line.setAttribute('stroke-dasharray', '4 3');
+                line.setAttribute('marker-end', 'url(#arrowhead)');
+                svg.appendChild(line);
+            });
+        });
+    }
+
+    // Draw on load and resize
+    window.addEventListener('load', drawDagArrows);
+    window.addEventListener('resize', drawDagArrows);
+
+    // Auto-refresh for active teams
+    {% if team.is_active %}
+    setInterval(function() {
+        fetch('/api/team/{{ team.name }}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                // Check if any task status changed
+                var changed = false;
+                data.tasks.forEach(function(t) {
+                    var card = document.getElementById('task-' + t.id);
+                    if (!card) return;
+                    var currentClasses = card.className;
+                    var expectedClass = 'status-' + t.status;
+                    if (!currentClasses.includes(expectedClass)) {
+                        changed = true;
+                    }
+                });
+                if (changed) {
+                    location.reload();
+                }
+            })
+            .catch(function() {});
+    }, 5000);
+    {% endif %}
+</script>
+{% endblock %}

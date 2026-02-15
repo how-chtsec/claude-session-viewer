@@ -1,0 +1,549 @@
+{% extends "base.html" %}
+{% block title %}{{ member.name }} - {{ member.team_name }} - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/teams" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">&larr;</span>All Teams
+</a>
+<a href="/team/{{ member.team_name }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
+    <span class="mr-2">&larr;</span>{{ member.team_name }}
+</a>
+<div class="mt-3">
+    <a href="/team/{{ member.team_name }}/member/{{ member.name }}" class="nav-link active block px-3 py-2 rounded-md text-sm text-claude-text truncate" title="{{ member.name }}">
+        {% if member.is_active %}
+        <span class="relative inline-flex h-2 w-2 mr-1.5 align-middle">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+        </span>
+        {% endif %}
+        {{ member.name }}
+    </a>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .tool-border-Read { border-left-color: #3b82f6; }
+    .tool-border-Write { border-left-color: #22c55e; }
+    .tool-border-Edit { border-left-color: #eab308; }
+    .tool-border-Bash { border-left-color: #ef4444; }
+    .tool-border-Glob { border-left-color: #8b5cf6; }
+    .tool-border-Grep { border-left-color: #06b6d4; }
+    .tool-border-Task { border-left-color: #f97316; }
+    .tool-border-WebFetch { border-left-color: #ec4899; }
+    .tool-border-WebSearch { border-left-color: #14b8a6; }
+    .tool-border-SendMessage { border-left-color: #a78bfa; }
+    .tool-border-TaskCreate { border-left-color: #f97316; }
+    .tool-border-TaskUpdate { border-left-color: #f97316; }
+    .tool-border-TaskList { border-left-color: #f97316; }
+
+    .tool-call-block {
+        border-left: 3px solid #4b5563;
+        background: rgba(26, 26, 46, 0.5);
+        border-radius: 0 6px 6px 0;
+        margin: 4px 0;
+        padding: 8px 12px;
+        font-size: 0.75rem;
+        transition: all 0.2s;
+    }
+    .tool-call-block:hover {
+        background: rgba(26, 26, 46, 0.8);
+    }
+
+    .msg-content {
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.6;
+    }
+
+    .thinking-block {
+        border-left: 2px solid #7c3aed;
+        padding-left: 12px;
+        color: #8b89a6;
+        font-style: italic;
+        white-space: pre-wrap;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .task-card {
+        border: 1px solid #2d2b55;
+        border-radius: 8px;
+        padding: 12px 16px;
+        background: #1a1a2e;
+        transition: border-color 0.2s;
+    }
+    .task-card:hover { border-color: #7c3aed; }
+    .task-card.status-pending { border-left: 3px solid #6b7280; }
+    .task-card.status-in_progress { border-left: 3px solid #eab308; }
+    .task-card.status-completed { border-left: 3px solid #22c55e; }
+
+    .collapsible-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease-out;
+    }
+    .collapsible-content.expanded {
+        max-height: 5000px;
+        transition: max-height 0.5s ease-in;
+    }
+
+    .stat-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #232340 100%);
+        border: 1px solid #2d2b55;
+        border-radius: 8px;
+        padding: 16px;
+        text-align: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <a href="/teams" class="hover:text-claude-accent2 transition-colors">Teams</a>
+        <span>/</span>
+        <a href="/team/{{ member.team_name }}" class="hover:text-claude-accent2 transition-colors">{{ member.team_name }}</a>
+        <span>/</span>
+        <span class="text-claude-text">{{ member.name }}</span>
+    </div>
+
+    <!-- Member profile card -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+            <div class="flex items-start gap-4 flex-1">
+                <!-- Avatar -->
+                <div class="flex-shrink-0 w-14 h-14 rounded-xl flex items-center justify-center text-2xl
+                    {% if member.agent_type == 'orchestrator' %}
+                    bg-yellow-500/15 border border-yellow-500/30
+                    {% else %}
+                    bg-purple-500/15 border border-purple-500/30
+                    {% endif %}">
+                    {% if member.agent_type == 'orchestrator' %}
+                    <span class="text-yellow-400">&#9733;</span>
+                    {% elif member.agent_type == 'Bash' %}
+                    <span class="text-green-400">$_</span>
+                    {% elif member.agent_type == 'Explore' %}
+                    <span class="text-blue-400">&#128269;</span>
+                    {% elif member.agent_type == 'Plan' %}
+                    <span class="text-cyan-400">&#9998;</span>
+                    {% else %}
+                    <span class="text-purple-400">&#9679;</span>
+                    {% endif %}
+                </div>
+
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-3 mb-1">
+                        <h1 class="text-xl font-bold text-claude-text">{{ member.name }}</h1>
+                        {% if member.is_active %}
+                        <span class="px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 text-xs font-medium flex items-center gap-1.5">
+                            <span class="relative flex h-2 w-2">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                            ACTIVE
+                        </span>
+                        {% endif %}
+                    </div>
+
+                    <!-- Info grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 mt-3 text-sm">
+                        <div class="flex items-center gap-2">
+                            <span class="text-claude-muted w-20 flex-shrink-0">Type</span>
+                            <span class="px-2 py-0.5 rounded bg-claude-surface2 text-claude-text text-xs">{{ member.agent_type }}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-claude-muted w-20 flex-shrink-0">Model</span>
+                            <span class="px-2 py-0.5 rounded bg-claude-surface2 text-claude-text text-xs font-mono">{{ member.model | replace('claude-', '') }}</span>
+                        </div>
+                        {% if member.cwd %}
+                        <div class="flex items-center gap-2 sm:col-span-2">
+                            <span class="text-claude-muted w-20 flex-shrink-0">CWD</span>
+                            <span class="text-claude-text text-xs font-mono truncate" title="{{ member.cwd }}">{{ member.cwd }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="flex items-center gap-2">
+                            <span class="text-claude-muted w-20 flex-shrink-0">Agent ID</span>
+                            <span class="text-claude-text text-xs font-mono truncate" title="{{ member.agent_id }}">{{ member.agent_id[:16] }}{% if member.agent_id|length > 16 %}...{% endif %}</span>
+                        </div>
+                        {% if member.joined_at %}
+                        <div class="flex items-center gap-2">
+                            <span class="text-claude-muted w-20 flex-shrink-0">Joined</span>
+                            <span class="text-claude-text text-xs">{{ member.joined_at | ms_to_datetime }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="flex items-center gap-2">
+                            <span class="text-claude-muted w-20 flex-shrink-0">Team</span>
+                            <a href="/team/{{ member.team_name }}" class="text-claude-accent2 text-xs hover:underline">{{ member.team_name }}</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Prompt (primary section) -->
+    {% if member.prompt %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-6">
+        <div class="flex items-center gap-2 mb-3">
+            <svg class="w-5 h-5 text-claude-accent2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+            </svg>
+            <h2 class="text-lg font-semibold text-claude-text">Agent Prompt</h2>
+            <button onclick="toggleCollapsible('prompt-full')" class="ml-auto text-xs text-claude-muted hover:text-claude-accent2 transition-colors" id="prompt-toggle-btn">
+                Expand
+            </button>
+        </div>
+        <div class="relative">
+            <div id="prompt-preview" class="text-sm text-claude-text msg-content leading-relaxed max-h-48 overflow-hidden">{{ member.prompt }}</div>
+            <div id="prompt-gradient" class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-claude-surface to-transparent pointer-events-none"></div>
+        </div>
+        <div id="prompt-full" class="collapsible-content">
+            <div class="text-sm text-claude-text msg-content leading-relaxed pt-2 border-t border-claude-border/30 mt-3">{{ member.prompt }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Stats row -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div class="stat-card">
+            <div class="text-2xl font-bold text-claude-text">{{ member.task_counts.total }}</div>
+            <div class="text-xs text-claude-muted mt-1">Assigned Tasks</div>
+        </div>
+        <div class="stat-card">
+            <div class="text-2xl font-bold
+                {% if member.task_counts.completed == member.task_counts.total and member.task_counts.total > 0 %}text-green-400
+                {% elif member.task_counts.in_progress > 0 %}text-yellow-400
+                {% else %}text-claude-text{% endif %}">
+                {% if member.task_counts.total > 0 %}{{ (member.task_counts.completed / member.task_counts.total * 100) | int }}%{% else %}--{% endif %}
+            </div>
+            <div class="text-xs text-claude-muted mt-1">Completion</div>
+        </div>
+        <div class="stat-card">
+            <div class="text-2xl font-bold text-claude-text">{{ member.stats.message_count }}</div>
+            <div class="text-xs text-claude-muted mt-1">Messages</div>
+        </div>
+        <div class="stat-card">
+            <div class="text-2xl font-bold text-claude-text">{{ member.stats.tool_call_count }}</div>
+            <div class="text-xs text-claude-muted mt-1">Tool Calls</div>
+        </div>
+    </div>
+
+    <!-- Assigned Tasks section -->
+    {% if member.assigned_tasks %}
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold text-claude-text mb-4">Assigned Tasks ({{ member.assigned_tasks | length }})</h2>
+
+        <!-- Task progress bar -->
+        {% if member.task_counts.total > 0 %}
+        <div class="mb-4">
+            <div class="flex rounded-full h-2.5 overflow-hidden bg-claude-bg">
+                {% if member.task_counts.completed > 0 %}
+                <div class="bg-green-500" style="width: {{ (member.task_counts.completed / member.task_counts.total * 100) }}%"></div>
+                {% endif %}
+                {% if member.task_counts.in_progress > 0 %}
+                <div class="bg-yellow-500" style="width: {{ (member.task_counts.in_progress / member.task_counts.total * 100) }}%"></div>
+                {% endif %}
+                {% if member.task_counts.pending > 0 %}
+                <div class="bg-gray-600" style="width: {{ (member.task_counts.pending / member.task_counts.total * 100) }}%"></div>
+                {% endif %}
+            </div>
+            <div class="flex gap-4 mt-1.5 text-xs text-claude-muted">
+                <span><span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"></span>Done: {{ member.task_counts.completed }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1"></span>Active: {{ member.task_counts.in_progress }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full bg-gray-600 mr-1"></span>Pending: {{ member.task_counts.pending }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="space-y-3">
+            {% for task in member.assigned_tasks %}
+            <div class="task-card status-{{ task.status }} cursor-pointer" onclick="toggleCollapsible('task-{{ task.id }}')">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                            {% if task.status == 'completed' %}
+                            <svg class="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            {% elif task.status == 'in_progress' %}
+                            <svg class="w-4 h-4 text-yellow-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            {% else %}
+                            <svg class="w-4 h-4 text-claude-muted/50 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="9" stroke-width="2"/>
+                            </svg>
+                            {% endif %}
+                            <span class="text-xs font-mono text-claude-muted">#{{ task.id }}</span>
+                            <span class="text-sm font-medium text-claude-text">{{ task.subject }}</span>
+                        </div>
+                        <div class="flex flex-wrap gap-2 text-xs ml-6">
+                            <span class="px-1.5 py-0.5 rounded
+                                {% if task.status == 'completed' %}bg-green-500/15 text-green-400
+                                {% elif task.status == 'in_progress' %}bg-yellow-500/15 text-yellow-400
+                                {% else %}bg-gray-500/15 text-gray-400{% endif %}">
+                                {{ task.status | replace('_', ' ') }}
+                            </span>
+                            {% if task.activeForm and task.status == 'in_progress' %}
+                            <span class="text-yellow-400/70">{{ task.activeForm }}</span>
+                            {% endif %}
+                            {% if task.blockedBy %}
+                            <span class="text-red-400/70">blocked by: #{{ task.blockedBy | join(', #') }}</span>
+                            {% endif %}
+                            {% if task.blocks %}
+                            <span class="text-blue-400/70">blocks: #{{ task.blocks | join(', #') }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <svg id="icon-task-{{ task.id }}" class="w-4 h-4 text-claude-muted transition-transform flex-shrink-0 mt-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                    </svg>
+                </div>
+                <div id="task-{{ task.id }}" class="collapsible-content">
+                    {% if task.description %}
+                    <div class="mt-3 pt-3 border-t border-claude-border/30 text-xs text-claude-muted msg-content">{{ task.description }}</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-8 text-center">
+        <p class="text-claude-muted text-sm">No tasks assigned to this member.</p>
+    </div>
+    {% endif %}
+
+    <!-- Activity Timeline (from subagent session) -->
+    {% if member.subagent_session %}
+    <div class="mb-8">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-claude-text">Activity Timeline</h2>
+            <div class="flex items-center gap-3 text-xs text-claude-muted">
+                {% if member.subagent_session.start_time %}
+                <span>{{ member.subagent_session.start_time | short_time }}</span>
+                {% endif %}
+                {% if member.subagent_session.end_time %}
+                <span>&rarr; {{ member.subagent_session.end_time | short_time }}</span>
+                {% endif %}
+                {% if member.subagent_link %}
+                <a href="/session/{{ member.subagent_link.0 }}/{{ member.subagent_link.1 }}"
+                   class="text-claude-accent2 hover:underline">View lead session</a>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if member.subagent_session.prompt %}
+        <div class="bg-claude-surface rounded-xl border border-claude-border p-4 mb-4">
+            <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Initial Prompt</div>
+            <div class="text-sm text-claude-text msg-content">{{ member.subagent_session.prompt }}</div>
+        </div>
+        {% endif %}
+
+        <div class="space-y-3">
+            {% for msg in member.subagent_session.messages %}
+            {% set msg_idx = loop.index0 %}
+            <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden">
+                <!-- Message header -->
+                <div class="px-4 py-2.5 border-b border-claude-border/50 flex items-center justify-between cursor-pointer"
+                     onclick="toggleCollapsible('msg-{{ msg_idx }}')">
+                    <div class="flex items-center gap-2">
+                        {% if msg.role == 'user' %}
+                        <span class="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">U</span>
+                        <span class="text-sm font-medium text-blue-400">User</span>
+                        {% else %}
+                        <span class="w-5 h-5 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs">A</span>
+                        <span class="text-sm font-medium text-purple-400">Assistant</span>
+                        {% if msg.model %}
+                        <span class="text-xs text-claude-muted font-mono">{{ msg.model | replace('claude-', '') }}</span>
+                        {% endif %}
+                        {% endif %}
+
+                        {% if msg.tool_calls %}
+                        <span class="px-1.5 py-0.5 rounded bg-claude-surface2 text-claude-muted text-xs">
+                            {{ msg.tool_calls | length }} tool{{ 's' if msg.tool_calls | length != 1 }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-3">
+                        {% if msg.timestamp %}
+                        <span class="text-xs text-claude-muted">{{ msg.timestamp | short_time }}</span>
+                        {% endif %}
+                        {% if msg.output_tokens %}
+                        <span class="text-xs text-claude-muted">{{ msg.output_tokens | format_tokens }} tok</span>
+                        {% endif %}
+                        <svg id="icon-msg-{{ msg_idx }}" class="w-3.5 h-3.5 text-claude-muted transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Message body (collapsible) -->
+                <div id="msg-{{ msg_idx }}" class="collapsible-content">
+                    <div class="p-4">
+                        {% if msg.content %}
+                        <div class="text-sm text-claude-text msg-content mb-3">{{ msg.content }}</div>
+                        {% endif %}
+
+                        {% if msg.tool_calls %}
+                        <div class="space-y-2">
+                            {% for tc in msg.tool_calls %}
+                            <div class="tool-call-block tool-border-{{ tc.tool_name }}" onclick="event.stopPropagation();">
+                                <div class="flex items-center justify-between mb-1 cursor-pointer"
+                                     onclick="toggleCollapsible('tc-{{ msg_idx }}-{{ loop.index0 }}')">
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-mono font-medium text-claude-accent2">{{ tc.tool_name }}</span>
+                                        {% if tc.input_params %}
+                                        <span class="text-claude-muted truncate max-w-xs">{{ tc.input_params }}</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        {% if tc.duration_ms %}
+                                        <span class="text-claude-muted">{{ tc.duration_ms | format_duration }}</span>
+                                        {% endif %}
+                                        <svg id="icon-tc-{{ msg_idx }}-{{ loop.index0 }}" class="w-3 h-3 text-claude-muted transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div id="tc-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-content">
+                                    {% if tc.input_params_raw %}
+                                    <div class="mt-2 p-2 rounded bg-claude-bg text-xs font-mono overflow-x-auto max-h-40 overflow-y-auto">
+                                        <pre class="text-claude-muted">{{ tc.input_params_raw | tojson(indent=2) }}</pre>
+                                    </div>
+                                    {% endif %}
+                                    {% if tc.output_result %}
+                                    <div class="mt-2">
+                                        <div class="text-xs text-claude-muted mb-1">Result:</div>
+                                        <div class="p-2 rounded bg-claude-bg text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                                            <pre class="text-green-400/80 whitespace-pre-wrap">{{ tc.output_result }}</pre>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% else %}
+    <!-- No subagent session found -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-8 text-center">
+        <svg class="w-10 h-10 mx-auto text-claude-border mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-claude-muted text-sm">No activity timeline available for this member.</p>
+        <p class="text-claude-muted/60 text-xs mt-1">Subagent session data was not found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Related tasks (tasks that depend on or are blocked by this member's tasks) -->
+    {% set related_task_ids = [] %}
+    {% for task in member.assigned_tasks %}
+        {% for bid in task.blocks %}
+            {% if bid not in related_task_ids %}
+                {% if related_task_ids.append(bid) %}{% endif %}
+            {% endif %}
+        {% endfor %}
+        {% for bid in task.blockedBy %}
+            {% if bid not in related_task_ids %}
+                {% if related_task_ids.append(bid) %}{% endif %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+
+    {% set ns = namespace(related_tasks=[]) %}
+    {% for task in member.all_team_tasks %}
+        {% if task.id in related_task_ids and task.owner != member.name %}
+            {% if ns.related_tasks.append(task) %}{% endif %}
+        {% endif %}
+    {% endfor %}
+
+    {% if ns.related_tasks %}
+    <div class="mb-8">
+        <h2 class="text-lg font-semibold text-claude-text mb-4">Related Tasks</h2>
+        <div class="space-y-2">
+            {% for task in ns.related_tasks %}
+            <div class="bg-claude-surface rounded-lg border border-claude-border p-3 flex items-center gap-3">
+                {% if task.status == 'completed' %}
+                <span class="inline-flex h-2.5 w-2.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                {% elif task.status == 'in_progress' %}
+                <span class="inline-flex h-2.5 w-2.5 rounded-full bg-yellow-500 flex-shrink-0"></span>
+                {% else %}
+                <span class="inline-flex h-2.5 w-2.5 rounded-full bg-gray-500 flex-shrink-0"></span>
+                {% endif %}
+                <span class="text-xs font-mono text-claude-muted">#{{ task.id }}</span>
+                <span class="text-sm text-claude-text flex-1 truncate">{{ task.subject }}</span>
+                {% if task.owner %}
+                <a href="/team/{{ member.team_name }}/member/{{ task.owner }}"
+                   class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 text-xs hover:bg-purple-500/25 transition-colors">
+                    {{ task.owner }}
+                </a>
+                {% endif %}
+                <span class="text-xs text-claude-muted">{{ task.status | replace('_', ' ') }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleCollapsible(id) {
+        var el = document.getElementById(id);
+        var icon = document.getElementById('icon-' + id);
+        if (el) {
+            el.classList.toggle('expanded');
+            if (icon) {
+                icon.style.transform = el.classList.contains('expanded') ? 'rotate(90deg)' : 'rotate(0deg)';
+            }
+            // Special handling for prompt section
+            if (id === 'prompt-full') {
+                var preview = document.getElementById('prompt-preview');
+                var gradient = document.getElementById('prompt-gradient');
+                var btn = document.getElementById('prompt-toggle-btn');
+                if (el.classList.contains('expanded')) {
+                    if (preview) preview.style.display = 'none';
+                    if (gradient) gradient.style.display = 'none';
+                    if (btn) btn.textContent = 'Collapse';
+                } else {
+                    if (preview) preview.style.display = '';
+                    if (gradient) gradient.style.display = '';
+                    if (btn) btn.textContent = 'Expand';
+                }
+            }
+        }
+    }
+
+    // Auto-expand first message and in-progress tasks
+    document.addEventListener('DOMContentLoaded', function() {
+        // Expand first message
+        var firstMsg = document.getElementById('msg-0');
+        if (firstMsg) {
+            firstMsg.classList.add('expanded');
+            var icon = document.getElementById('icon-msg-0');
+            if (icon) icon.style.transform = 'rotate(90deg)';
+        }
+        // Expand in-progress tasks
+        document.querySelectorAll('.task-card.status-in_progress').forEach(function(card) {
+            var id = card.querySelector('.collapsible-content');
+            if (id) {
+                id.classList.add('expanded');
+            }
+        });
+    });
+</script>
+{% endblock %}

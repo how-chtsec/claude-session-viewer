@@ -1,0 +1,509 @@
+{% extends "base.html" %}
+{% block title %}{{ session.slug or session.session_id[:12] }} - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">←</span>All Projects
+</a>
+<a href="/project/{{ session.project_dir_name }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
+    <span class="mr-2">📂</span>Back to Project
+</a>
+<div class="mt-3 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">This Session</div>
+    <div class="text-sm text-claude-text font-medium truncate" title="{{ session.slug or session.session_id }}">{{ session.slug or session.session_id[:12] }}</div>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .msg-user {
+        border-left: 3px solid #0d9488;
+    }
+    .msg-assistant {
+        border-left: 3px solid #7c3aed;
+    }
+    .msg-user .msg-role-badge { background: rgba(13, 148, 136, 0.15); color: #5eead4; }
+    .msg-assistant .msg-role-badge { background: rgba(124, 58, 237, 0.15); color: #c4b5fd; }
+
+    .tool-card {
+        border-left: 3px solid #4b5563;
+        transition: border-color 0.2s;
+    }
+    .tool-header {
+        cursor: pointer;
+        user-select: none;
+    }
+    .tool-header:hover { background: rgba(255,255,255,0.03); }
+
+    .msg-content {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        line-height: 1.6;
+    }
+    .msg-content p { margin-bottom: 0.5em; }
+
+    .thinking-block {
+        border-left: 2px solid #4b5563;
+        background: rgba(75, 85, 99, 0.1);
+    }
+
+    .token-badge {
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(139, 137, 166, 0.15);
+        color: #8b89a6;
+    }
+
+    .search-highlight {
+        background: rgba(234, 179, 8, 0.3);
+        border-radius: 2px;
+        padding: 0 2px;
+    }
+
+    .subagent-panel {
+        border: 1px solid #2d2b55;
+        background: rgba(26, 26, 46, 0.5);
+    }
+
+    .copy-btn {
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+    .code-wrapper:hover .copy-btn { opacity: 1; }
+
+    #search-bar {
+        transition: all 0.2s;
+    }
+    #search-bar:focus {
+        border-color: #7c3aed;
+        box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <a href="/project/{{ session.project_dir_name }}" class="hover:text-claude-accent2 transition-colors">Project</a>
+        <span>/</span>
+        <span class="text-claude-text">{{ session.slug or session.session_id[:12] }}</span>
+    </div>
+
+    <!-- Session metadata header -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+            <div>
+                <div class="flex items-center gap-3 mb-2">
+                    <h1 class="text-xl font-bold text-claude-text">{{ session.slug or session.session_id[:12] }}</h1>
+                    {% if session.agent_name %}
+                    <a href="/team/{{ session.team_name }}/member/{{ session.agent_name }}" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/15 text-yellow-300 text-xs font-medium hover:bg-yellow-500/25 transition-colors" title="Team: {{ session.team_name }}">
+                        {% if session.agent_type == 'orchestrator' %}&#9733;{% else %}&#9679;{% endif %}
+                        {{ session.agent_name }}
+                    </a>
+                    <a href="/team/{{ session.team_name }}" class="px-2.5 py-1 rounded-full bg-claude-surface2 text-claude-muted text-xs hover:text-claude-accent2 transition-colors">{{ session.team_name }}</a>
+                    {% endif %}
+                    {% if session.is_active %}
+                    <a href="/live/{{ session.project_dir_name }}/{{ session.session_id }}" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 text-xs font-medium hover:bg-green-500/25 transition-colors">
+                        <span class="relative flex h-2 w-2">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        LIVE - Click to monitor
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="flex flex-wrap items-center gap-3 text-sm">
+                    {% if session.model %}
+                    <span class="px-2.5 py-1 rounded-full bg-claude-accent/20 text-claude-accent2 text-xs font-medium">{{ session.model }}</span>
+                    {% endif %}
+                    {% if session.start_time %}
+                    <span class="text-claude-muted" title="{{ session.start_time }}">{{ session.start_time | time_ago }}</span>
+                    {% endif %}
+                    {% if session.duration_ms %}
+                    <span class="text-claude-muted">⏱ {{ session.duration_ms | format_duration }}</span>
+                    {% endif %}
+                    {% if session.git_branch %}
+                    <span class="px-2 py-0.5 rounded bg-claude-surface2 text-claude-muted text-xs font-mono">🌿 {{ session.git_branch }}</span>
+                    {% endif %}
+                    {% if session.version %}
+                    <span class="text-claude-muted text-xs">v{{ session.version }}</span>
+                    {% endif %}
+                </div>
+                {% if session.cwd %}
+                <div class="text-xs text-claude-muted font-mono mt-2">{{ session.cwd }}</div>
+                {% endif %}
+            </div>
+            <div class="text-sm text-claude-muted">
+                <span class="font-medium text-claude-text">{{ session.message_count }}</span> messages
+            </div>
+        </div>
+
+        <!-- Token usage bar -->
+        {% set total_tokens = session.total_input_tokens + session.total_output_tokens + session.total_cache_read_tokens + session.total_cache_creation_tokens %}
+        {% if total_tokens > 0 %}
+        <div class="mb-4">
+            <div class="text-xs text-claude-muted mb-2 font-medium">Token Usage</div>
+            <div class="flex rounded-full h-3 overflow-hidden bg-claude-bg">
+                {% if session.total_input_tokens %}
+                <div class="bg-blue-500" style="width: {{ (session.total_input_tokens / total_tokens * 100) }}%" title="Input: {{ session.total_input_tokens | format_tokens }}"></div>
+                {% endif %}
+                {% if session.total_output_tokens %}
+                <div class="bg-green-500" style="width: {{ (session.total_output_tokens / total_tokens * 100) }}%" title="Output: {{ session.total_output_tokens | format_tokens }}"></div>
+                {% endif %}
+                {% if session.total_cache_read_tokens %}
+                <div class="bg-yellow-500/70" style="width: {{ (session.total_cache_read_tokens / total_tokens * 100) }}%" title="Cache Read: {{ session.total_cache_read_tokens | format_tokens }}"></div>
+                {% endif %}
+                {% if session.total_cache_creation_tokens %}
+                <div class="bg-purple-500/70" style="width: {{ (session.total_cache_creation_tokens / total_tokens * 100) }}%" title="Cache Create: {{ session.total_cache_creation_tokens | format_tokens }}"></div>
+                {% endif %}
+            </div>
+            <div class="flex flex-wrap gap-4 mt-2 text-xs text-claude-muted">
+                <span><span class="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1"></span>Input: {{ session.total_input_tokens | format_tokens }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"></span>Output: {{ session.total_output_tokens | format_tokens }}</span>
+                {% if session.total_cache_read_tokens %}
+                <span><span class="inline-block w-2 h-2 rounded-full bg-yellow-500/70 mr-1"></span>Cache Read: {{ session.total_cache_read_tokens | format_tokens }}</span>
+                {% endif %}
+                {% if session.total_cache_creation_tokens %}
+                <span><span class="inline-block w-2 h-2 rounded-full bg-purple-500/70 mr-1"></span>Cache Create: {{ session.total_cache_creation_tokens | format_tokens }}</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tool usage summary -->
+        {% if session.tool_summary %}
+        <div>
+            <div class="text-xs text-claude-muted mb-2 font-medium">Tools Used</div>
+            <div class="flex flex-wrap gap-2">
+                {% for tool_name, info in session.tool_summary.items() %}
+                <span class="px-2.5 py-1 rounded-lg bg-claude-surface2 text-xs text-claude-text">
+                    {% if tool_name == 'Bash' %}💻{% elif tool_name == 'Read' %}📖{% elif tool_name == 'Write' %}✏️{% elif tool_name == 'Edit' %}🔧{% elif tool_name == 'Grep' %}🔍{% elif tool_name == 'Glob' %}📁{% elif tool_name == 'Task' %}🤖{% elif tool_name == 'WebFetch' %}🌐{% elif tool_name == 'WebSearch' %}🔎{% elif tool_name == 'SendMessage' %}💬{% else %}⚡{% endif %}
+                    {{ tool_name }}
+                    <span class="text-claude-muted ml-1">×{{ info.count }}</span>
+                    {% if info.total_duration_ms %}
+                    <span class="text-claude-muted ml-1">({{ info.total_duration_ms | format_duration }})</span>
+                    {% endif %}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Controls bar -->
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
+        <div class="relative flex-1">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-claude-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input type="text" id="search-bar" placeholder="Search messages..." class="w-full pl-10 pr-4 py-2 bg-claude-surface border border-claude-border rounded-lg text-sm text-claude-text placeholder-claude-muted outline-none">
+        </div>
+        <div class="flex gap-2">
+            <button onclick="expandAll()" class="px-3 py-2 text-xs bg-claude-surface border border-claude-border rounded-lg text-claude-muted hover:text-claude-text hover:border-claude-accent transition-all">
+                Expand All
+            </button>
+            <button onclick="collapseAll()" class="px-3 py-2 text-xs bg-claude-surface border border-claude-border rounded-lg text-claude-muted hover:text-claude-text hover:border-claude-accent transition-all">
+                Collapse All
+            </button>
+        </div>
+    </div>
+
+    <!-- Conversation timeline -->
+    <div id="timeline" class="space-y-4">
+        {% for entry in session.timeline %}
+        {% set msg_idx = loop.index0 %}
+        <div class="message-block fade-in" data-index="{{ msg_idx }}" data-role="{{ entry.role }}">
+            {% if entry.role == 'user' %}
+            <!-- User message -->
+            <div class="msg-user bg-claude-surface rounded-xl p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">User</span>
+                        {% if entry.timestamp %}
+                        <span class="text-xs text-claude-muted" title="{{ entry.timestamp }}">{{ entry.timestamp | short_time }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="msg-content text-sm text-claude-text">{{ entry.content }}</div>
+            </div>
+
+            {% elif entry.role == 'assistant' %}
+            <!-- Assistant message -->
+            <div class="msg-assistant bg-claude-surface rounded-xl p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">Assistant</span>
+                        {% if entry.model %}
+                        <span class="text-xs text-claude-muted">{{ entry.model }}</span>
+                        {% endif %}
+                        {% if entry.timestamp %}
+                        <span class="text-xs text-claude-muted" title="{{ entry.timestamp }}">{{ entry.timestamp | short_time }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        {% if entry.input_tokens or entry.output_tokens %}
+                        <span class="token-badge font-mono">
+                            in: {{ entry.input_tokens | format_tokens }} | out: {{ entry.output_tokens | format_tokens }}
+                            {% if entry.cache_read_tokens %} | cache: {{ entry.cache_read_tokens | format_tokens }}{% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Thinking block -->
+                {% if entry.has_thinking and entry.thinking_text %}
+                <div class="mb-4">
+                    <button onclick="toggleCollapse('thinking-{{ loop.index0 }}')" class="flex items-center gap-2 text-xs text-claude-muted hover:text-claude-text transition-colors mb-1">
+                        <svg id="icon-thinking-{{ loop.index0 }}" class="w-3 h-3 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M6.293 4.293a1 1 0 011.414 0L12 8.586l4.293-4.293a1 1 0 111.414 1.414l-5 5a1 1 0 01-1.414 0l-5-5a1 1 0 010-1.414z"/>
+                        </svg>
+                        💭 Thinking
+                    </button>
+                    <div id="thinking-{{ loop.index0 }}" class="collapsible-body">
+                        <div class="thinking-block rounded-lg p-4 mt-1 text-xs text-claude-muted msg-content max-h-96 overflow-y-auto">{{ entry.thinking_text }}</div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Content -->
+                {% if entry.content %}
+                <div class="msg-content text-sm text-claude-text mb-4">{{ entry.content }}</div>
+                {% endif %}
+
+                <!-- Tool calls -->
+                {% if entry.tool_calls %}
+                <div class="space-y-2 mt-3">
+                    {% for tc in entry.tool_calls %}
+                    <div class="tool-card tool-border-{{ tc.tool_name }} rounded-lg bg-claude-bg/50 overflow-hidden">
+                        <!-- Tool header -->
+                        <div class="tool-header flex items-center justify-between px-4 py-2.5" onclick="toggleCollapse('tool-{{ msg_idx }}-{{ loop.index0 }}')">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <svg id="icon-tool-{{ msg_idx }}-{{ loop.index0 }}" class="w-3 h-3 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                </svg>
+                                <span class="text-sm flex-shrink-0">
+                                    {% if tc.tool_name == 'Bash' %}💻{% elif tc.tool_name == 'Read' %}📖{% elif tc.tool_name == 'Write' %}✏️{% elif tc.tool_name == 'Edit' %}🔧{% elif tc.tool_name == 'Grep' %}🔍{% elif tc.tool_name == 'Glob' %}📁{% elif tc.tool_name == 'Task' %}🤖{% elif tc.tool_name == 'WebFetch' %}🌐{% elif tc.tool_name == 'WebSearch' %}🔎{% elif tc.tool_name == 'SendMessage' %}💬{% else %}⚡{% endif %}
+                                </span>
+                                <span class="text-sm font-medium text-claude-text flex-shrink-0">{{ tc.tool_name }}</span>
+                                <span class="text-xs text-claude-muted truncate">{{ tc.input_params }}</span>
+                            </div>
+                            {% if tc.duration_ms %}
+                            <span class="text-xs text-claude-muted flex-shrink-0 ml-2">{{ tc.duration_ms | format_duration }}</span>
+                            {% endif %}
+                        </div>
+
+                        <!-- Tool body (collapsible) -->
+                        <div id="tool-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                            <div class="px-4 pb-3 border-t border-claude-border/30">
+                                <!-- Input params -->
+                                {% if tc.input_params_raw %}
+                                <div class="mt-3">
+                                    <button onclick="toggleCollapse('input-{{ msg_idx }}-{{ loop.index0 }}')" class="text-xs text-claude-muted hover:text-claude-text transition-colors mb-1 flex items-center gap-1">
+                                        <svg id="icon-input-{{ msg_idx }}-{{ loop.index0 }}" class="w-2.5 h-2.5 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                        </svg>
+                                        Input Parameters
+                                    </button>
+                                    <div id="input-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                                        <div class="code-wrapper relative">
+                                            <button class="copy-btn absolute top-2 right-2 px-2 py-1 text-xs bg-claude-surface2 text-claude-muted rounded hover:text-claude-text" onclick="copyText(this)">Copy</button>
+                                            <pre class="mt-1 text-xs overflow-x-auto max-h-96"><code class="language-json">{{ tc.input_params_raw | tojson(indent=2) }}</code></pre>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                <!-- Output -->
+                                {% if tc.output_result %}
+                                <div class="mt-3">
+                                    <div class="flex items-center justify-between">
+                                        <button onclick="toggleCollapse('output-{{ msg_idx }}-{{ loop.index0 }}')" class="text-xs text-claude-muted hover:text-claude-text transition-colors mb-1 flex items-center gap-1">
+                                            <svg id="icon-output-{{ msg_idx }}-{{ loop.index0 }}" class="w-2.5 h-2.5 transition-transform rotate-90" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                            </svg>
+                                            Output
+                                            {% if tc.output_result_full_length and tc.output_result_full_length > 5000 %}
+                                            <span class="text-claude-muted">(truncated, {{ tc.output_result_full_length | format_tokens }} chars total)</span>
+                                            {% endif %}
+                                        </button>
+                                    </div>
+                                    <div id="output-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body expanded">
+                                        <div class="code-wrapper relative">
+                                            <button class="copy-btn absolute top-2 right-2 px-2 py-1 text-xs bg-claude-surface2 text-claude-muted rounded hover:text-claude-text" onclick="copyText(this)">Copy</button>
+                                            <pre class="mt-1 text-xs overflow-x-auto max-h-96 overflow-y-auto"><code>{{ tc.output_result }}</code></pre>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Subagents section -->
+    {% if session.subagents %}
+    <div class="mt-8">
+        <h2 class="text-lg font-semibold text-claude-text mb-4">🤖 Subagents ({{ session.subagents | length }})</h2>
+        <div class="space-y-3">
+            {% for sa in session.subagents %}
+            {% set sa_idx = loop.index0 %}
+            <div class="subagent-panel rounded-xl overflow-hidden">
+                <button onclick="toggleCollapse('subagent-{{ sa_idx }}')" class="w-full flex items-center justify-between px-5 py-4 hover:bg-claude-surface2/30 transition-colors">
+                    <div class="flex items-center gap-3 text-left min-w-0">
+                        <svg id="icon-subagent-{{ sa_idx }}" class="w-4 h-4 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                        </svg>
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium text-claude-text">Agent: {{ sa.agent_id[:16] }}</div>
+                            <div class="text-xs text-claude-muted truncate">{{ sa.prompt }}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                        {% if sa.model %}
+                        <span class="px-2 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-300">{{ sa.model }}</span>
+                        {% endif %}
+                        <span class="text-xs text-claude-muted">{{ sa.message_count }} msgs</span>
+                    </div>
+                </button>
+
+                <div id="subagent-{{ sa_idx }}" class="collapsible-body">
+                    <div class="px-5 pb-5 border-t border-claude-border/30 pt-4 space-y-3">
+                        {% for msg in sa.messages %}
+                        {% set sa_msg_idx = loop.index0 %}
+                        <div class="{% if msg.role == 'user' %}msg-user{% else %}msg-assistant{% endif %} rounded-lg p-4 bg-claude-bg/30">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">{{ msg.role | capitalize }}</span>
+                                {% if msg.timestamp %}
+                                <span class="text-xs text-claude-muted">{{ msg.timestamp | short_time }}</span>
+                                {% endif %}
+                            </div>
+                            {% if msg.content %}
+                            <div class="msg-content text-xs text-claude-text">{{ msg.content }}</div>
+                            {% endif %}
+
+                            {% if msg.tool_calls %}
+                            <div class="mt-2 space-y-1">
+                                {% for tc in msg.tool_calls %}
+                                <div class="tool-card tool-border-{{ tc.tool_name }} rounded bg-claude-bg/30 overflow-hidden">
+                                    <div class="tool-header flex items-center gap-2 px-3 py-1.5" onclick="toggleCollapse('sa-tool-{{ sa_idx }}-{{ sa_msg_idx }}-{{ loop.index0 }}')">
+                                        <svg id="icon-sa-tool-{{ sa_idx }}-{{ sa_msg_idx }}-{{ loop.index0 }}" class="w-2.5 h-2.5 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                        </svg>
+                                        <span class="text-xs">
+                                            {% if tc.tool_name == 'Bash' %}💻{% elif tc.tool_name == 'Read' %}📖{% elif tc.tool_name == 'Write' %}✏️{% elif tc.tool_name == 'Edit' %}🔧{% elif tc.tool_name == 'Grep' %}🔍{% elif tc.tool_name == 'Glob' %}📁{% elif tc.tool_name == 'Task' %}🤖{% elif tc.tool_name == 'WebFetch' %}🌐{% elif tc.tool_name == 'WebSearch' %}🔎{% elif tc.tool_name == 'SendMessage' %}💬{% else %}⚡{% endif %}
+                                        </span>
+                                        <span class="text-xs font-medium text-claude-text">{{ tc.tool_name }}</span>
+                                        <span class="text-xs text-claude-muted truncate">{{ tc.input_params }}</span>
+                                    </div>
+                                    <div id="sa-tool-{{ sa_idx }}-{{ sa_msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                                        <div class="px-3 pb-2 border-t border-claude-border/20">
+                                            {% if tc.output_result %}
+                                            <pre class="mt-2 text-xs overflow-x-auto max-h-48 overflow-y-auto"><code>{{ tc.output_result }}</code></pre>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Expand/Collapse all
+    function expandAll() {
+        document.querySelectorAll('.collapsible-body').forEach(function(el) {
+            el.classList.add('expanded');
+            var icon = document.getElementById('icon-' + el.id);
+            if (icon) icon.style.transform = 'rotate(90deg)';
+        });
+    }
+    function collapseAll() {
+        document.querySelectorAll('.collapsible-body').forEach(function(el) {
+            el.classList.remove('expanded');
+            var icon = document.getElementById('icon-' + el.id);
+            if (icon) icon.style.transform = 'rotate(0deg)';
+        });
+    }
+
+    // Copy button for code blocks
+    function copyText(btn) {
+        var wrapper = btn.closest('.code-wrapper');
+        var code = wrapper.querySelector('code');
+        if (code) {
+            navigator.clipboard.writeText(code.textContent).then(function() {
+                btn.textContent = 'Copied!';
+                setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+            });
+        }
+    }
+
+    // Search/filter
+    var searchBar = document.getElementById('search-bar');
+    if (searchBar) {
+        searchBar.addEventListener('input', function() {
+            var query = this.value.toLowerCase().trim();
+            var blocks = document.querySelectorAll('.message-block');
+            blocks.forEach(function(block) {
+                if (!query) {
+                    block.style.display = '';
+                    return;
+                }
+                var text = block.textContent.toLowerCase();
+                block.style.display = text.includes(query) ? '' : 'none';
+            });
+        });
+    }
+
+    // Keyboard shortcuts: j/k for next/prev message
+    var currentIndex = -1;
+    document.addEventListener('keydown', function(e) {
+        // Skip if user is typing in an input
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        var blocks = document.querySelectorAll('.message-block:not([style*="display: none"])');
+        if (!blocks.length) return;
+
+        if (e.key === 'j') {
+            currentIndex = Math.min(currentIndex + 1, blocks.length - 1);
+            blocks[currentIndex].scrollIntoView({ behavior: 'smooth', block: 'start' });
+            e.preventDefault();
+        } else if (e.key === 'k') {
+            currentIndex = Math.max(currentIndex - 1, 0);
+            blocks[currentIndex].scrollIntoView({ behavior: 'smooth', block: 'start' });
+            e.preventDefault();
+        } else if (e.key === '/') {
+            e.preventDefault();
+            searchBar.focus();
+        }
+    });
+
+    // Initialize highlight.js on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('pre code').forEach(function(block) {
+            hljs.highlightElement(block);
+        });
+    });
+</script>
+{% endblock %}
