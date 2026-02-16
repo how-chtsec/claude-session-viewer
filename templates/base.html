@@ -77,6 +77,12 @@
             border-left: 3px solid #7c3aed;
         }
 
+        .top-nav-active {
+            color: #a78bfa !important;
+            border-bottom: 2px solid #7c3aed;
+            padding-bottom: 2px;
+        }
+
         .stat-card {
             background: linear-gradient(135deg, #1a1a2e 0%, #232340 100%);
             border: 1px solid #2d2b55;
@@ -140,27 +146,27 @@
             Claude Viewer
         </a>
         <div class="ml-auto flex items-center gap-4">
-            <a href="/" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors">Dashboard</a>
-            <a href="/usage" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+            <a href="/" class="text-sm hover:text-claude-accent2 transition-colors {{ 'top-nav-active text-claude-accent2' if request.path == '/' else 'text-claude-muted' }}">Dashboard</a>
+            <a href="/usage" class="text-sm hover:text-claude-accent2 transition-colors flex items-center gap-1.5 {{ 'top-nav-active text-claude-accent2' if request.path.startswith('/usage') else 'text-claude-muted' }}">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
                 </svg>
                 Usage
             </a>
-            <a href="/teams" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+            <a href="/teams" class="text-sm hover:text-claude-accent2 transition-colors flex items-center gap-1.5 {{ 'top-nav-active text-claude-accent2' if request.path.startswith('/team') else 'text-claude-muted' }}">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
                 </svg>
                 Teams
             </a>
-            <a href="/live" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+            <a href="/live" class="text-sm hover:text-claude-accent2 transition-colors flex items-center gap-1.5 {{ 'top-nav-active text-claude-accent2' if request.path.startswith('/live') else 'text-claude-muted' }}" title="Active session list">
                 <span class="relative flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                     <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                 </span>
                 Live
             </a>
-            <a href="/monitor" class="text-sm text-claude-muted hover:text-claude-accent2 transition-colors flex items-center gap-1.5">
+            <a href="/monitor" class="text-sm hover:text-claude-accent2 transition-colors flex items-center gap-1.5 {{ 'top-nav-active text-claude-accent2' if request.path.startswith('/monitor') else 'text-claude-muted' }}" title="Multi-pane monitoring dashboard">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
                 </svg>

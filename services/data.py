@@ -277,6 +277,10 @@ def get_dashboard_data() -> dict:
     recent_sessions = recent_sessions[:10]
     enrich_sessions_with_agent_info(recent_sessions)
 
+    # Check active status for recent sessions
+    for s in recent_sessions:
+        s['is_active'] = is_session_active(s.get('project_dir_name', ''), s.get('session_id', ''))
+
     return {
         'projects': projects,
         'stats': stats,

@@ -9,6 +9,9 @@
     <a href="/project/{{ project.dir_name }}" class="nav-link active block px-3 py-2 rounded-md text-sm text-claude-text truncate" title="{{ project.name }}">
         <span class="mr-2">📂</span>{{ project.name }}
     </a>
+    <a href="/usage/project/{{ project.dir_name }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
+        <span class="mr-2">📊</span>Token Usage
+    </a>
 </div>
 {% endblock %}
 

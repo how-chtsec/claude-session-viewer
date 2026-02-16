@@ -23,6 +23,13 @@
 
 {% block content %}
 <div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <span class="text-claude-text">Live Sessions</span>
+    </div>
+
     <div class="mb-8">
         <div class="flex items-center gap-3">
             <h1 class="text-2xl font-bold text-claude-text">Live Sessions</h1>
@@ -32,6 +39,12 @@
             </span>
         </div>
         <p class="text-claude-muted text-sm mt-1">Sessions active in the last 2 minutes. Auto-refreshes every 5 seconds.</p>
+        <a href="/monitor" class="inline-flex items-center gap-2 mt-3 px-4 py-2 rounded-lg bg-claude-surface2 border border-claude-border text-sm text-claude-accent2 hover:border-claude-accent hover:bg-claude-accent/10 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+            </svg>
+            Open Monitor Dashboard &rarr;
+        </a>
     </div>
 
     <div id="active-list">

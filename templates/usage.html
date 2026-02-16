@@ -22,6 +22,16 @@
         </div>
     </div>
 </div>
+{% if projects %}
+<div class="mt-4 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Projects</div>
+    {% for p in projects[:15] %}
+    <a href="/usage/project/{{ p.dir_name }}" class="block px-2 py-1 text-xs text-claude-text truncate rounded hover:bg-claude-surface2 transition-colors" title="{{ p.name }}">
+        {{ p.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block content %}

@@ -258,9 +258,17 @@
                                 </a>
                             </td>
                             <td class="px-4 py-3">
-                                <a href="/session/{{ s.project_dir_name }}/{{ s.session_id }}" class="text-claude-text hover:text-claude-accent2 transition-colors font-medium">
-                                    {{ s.slug or s.session_id[:8] }}
-                                </a>
+                                <div class="flex items-center gap-1.5">
+                                    {% if s.is_active %}
+                                    <span class="relative flex h-2 w-2 flex-shrink-0">
+                                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                    </span>
+                                    {% endif %}
+                                    <a href="/session/{{ s.project_dir_name }}/{{ s.session_id }}" class="text-claude-text hover:text-claude-accent2 transition-colors font-medium">
+                                        {{ s.slug or s.session_id[:8] }}
+                                    </a>
+                                </div>
                                 {% if s.agent_name %}
                                 <a href="/team/{{ s.team_name }}/member/{{ s.agent_name }}" class="ml-1 px-1.5 py-0.5 text-xs bg-yellow-500/15 text-yellow-300 rounded hover:bg-yellow-500/25 transition-colors">{{ s.agent_name }}</a>
                                 {% endif %}

@@ -7,6 +7,7 @@
 </a>
 <a href="/session/{{ session.project_dir_name }}/{{ session.session_id }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
     <span class="mr-2">📄</span>Static View
+    <span class="block text-xs text-claude-muted/70 ml-6 mt-0.5">Full session with search &amp; tools</span>
 </a>
 <div class="mt-3 px-3">
     <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Session</div>
@@ -75,6 +76,15 @@
 
 {% block content %}
 <div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <a href="/live" class="hover:text-claude-accent2 transition-colors">Live</a>
+        <span>/</span>
+        <span class="text-claude-text">{{ session.slug or session.session_id[:12] }}</span>
+    </div>
+
     <!-- Live status bar (sticky) -->
     <div id="status-bar" class="sticky top-14 z-10 status-bar bg-claude-surface/90 border border-green-500/30 rounded-xl px-5 py-3 mb-6">
         <div class="flex items-center justify-between flex-wrap gap-3">
