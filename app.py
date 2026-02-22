@@ -27,6 +27,8 @@ from services.data import (
     enrich_sessions_with_agent_info,
     get_project_token_stats,
     get_project_usage_detail,
+    get_subagent_detail,
+    group_sessions_by_date,
 )
 
 app = Flask(__name__)
@@ -77,7 +79,8 @@ def project_detail(project_dir_name):
     project = next((p for p in projects if p['dir_name'] == project_dir_name), None)
     if not project:
         abort(404)
-    return render_template('project.html', project=project, sessions=sessions)
+    date_groups = group_sessions_by_date(sessions)
+    return render_template('project.html', project=project, sessions=sessions, date_groups=date_groups)
 
 
 @app.route('/api/session/<path:project_dir_name>/<session_id>')
@@ -294,6 +297,15 @@ def session_detail(project_dir_name, session_id):
     return render_template('session.html', session=detail)
 
 
+@app.route('/session/<path:project_dir_name>/<session_id>/subagent/<agent_id>')
+def subagent_detail_view(project_dir_name, session_id, agent_id):
+    """Dedicated subagent detail page."""
+    detail = get_subagent_detail(project_dir_name, session_id, agent_id)
+    if not detail:
+        abort(404)
+    return render_template('subagent_detail.html', subagent=detail)
+
+
 # ---------------------------------------------------------------------------
 # Error handlers
 # ---------------------------------------------------------------------------
@@ -375,6 +387,18 @@ def time_ago(timestamp):
         return dt.strftime('%Y-%m-%d')
     except (ValueError, TypeError):
         return timestamp or ''
+
+
+@app.template_filter('format_cost')
+def format_cost(value):
+    """Format USD cost value. Shows $X.XX for >= $0.01, <$0.01 otherwise."""
+    if not value or value <= 0:
+        return '-'
+    if value >= 100:
+        return f'${value:,.0f}'
+    if value >= 0.01:
+        return f'${value:.2f}'
+    return '<$0.01'
 
 
 @app.template_filter('short_time')

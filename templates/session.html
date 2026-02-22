@@ -197,6 +197,38 @@
         {% endif %}
     </div>
 
+    <!-- Subagent summary cards -->
+    {% if session.subagents %}
+    <div class="mb-6">
+        <div class="text-xs text-claude-muted uppercase tracking-wider mb-3 font-medium">Subagents ({{ session.subagents | length }})</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {% for sa in session.subagents %}
+            <a href="/session/{{ session.project_dir_name }}/{{ session.session_id }}/subagent/{{ sa.agent_id }}" class="bg-claude-surface rounded-xl border border-claude-border p-4 hover:border-claude-accent transition-all group block">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-sm">🤖</span>
+                    <span class="text-sm font-medium text-claude-text group-hover:text-claude-accent2 transition-colors truncate">
+                        {% if sa.member_name %}{{ sa.member_name }}{% else %}{{ sa.agent_id[:16] }}{% endif %}
+                    </span>
+                    {% if sa.model %}
+                    <span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-300 ml-auto flex-shrink-0">{{ sa.model }}</span>
+                    {% endif %}
+                </div>
+                <div class="flex items-center gap-3 text-xs text-claude-muted">
+                    <span>{{ sa.message_count }} msgs</span>
+                    <span>{{ sa.tool_call_count }} tools</span>
+                    {% if sa.total_tokens %}
+                    <span class="font-mono">{{ sa.total_tokens | compact_tokens }} tok</span>
+                    {% endif %}
+                </div>
+                {% if sa.prompt %}
+                <div class="text-xs text-claude-muted mt-2 truncate">{{ sa.prompt[:100] }}</div>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Controls bar -->
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
         <div class="relative flex-1">
@@ -368,8 +400,10 @@
                             <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
                         </svg>
                         <div class="min-w-0">
-                            <div class="text-sm font-medium text-claude-text">Agent: {{ sa.agent_id[:16] }}</div>
-                            <div class="text-xs text-claude-muted truncate">{{ sa.prompt }}</div>
+                            <div class="text-sm font-medium text-claude-text">
+                                {% if sa.member_name %}{{ sa.member_name }}{% else %}Agent: {{ sa.agent_id[:16] }}{% endif %}
+                            </div>
+                            <div class="text-xs text-claude-muted truncate">{{ sa.prompt[:200] }}</div>
                         </div>
                     </div>
                     <div class="flex items-center gap-3 flex-shrink-0 ml-3">
@@ -377,6 +411,10 @@
                         <span class="px-2 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-300">{{ sa.model }}</span>
                         {% endif %}
                         <span class="text-xs text-claude-muted">{{ sa.message_count }} msgs</span>
+                        {% if sa.total_tokens %}
+                        <span class="token-badge font-mono">{{ sa.total_tokens | compact_tokens }}</span>
+                        {% endif %}
+                        <a href="/session/{{ session.project_dir_name }}/{{ session.session_id }}/subagent/{{ sa.agent_id }}" class="px-2 py-1 text-xs bg-claude-accent/20 text-claude-accent2 rounded hover:bg-claude-accent/30 transition-colors" onclick="event.stopPropagation();">View Detail</a>
                     </div>
                 </button>
 
@@ -385,10 +423,18 @@
                         {% for msg in sa.messages %}
                         {% set sa_msg_idx = loop.index0 %}
                         <div class="{% if msg.role == 'user' %}msg-user{% else %}msg-assistant{% endif %} rounded-lg p-4 bg-claude-bg/30">
-                            <div class="flex items-center gap-2 mb-2">
-                                <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">{{ msg.role | capitalize }}</span>
-                                {% if msg.timestamp %}
-                                <span class="text-xs text-claude-muted">{{ msg.timestamp | short_time }}</span>
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">{{ msg.role | capitalize }}</span>
+                                    {% if msg.timestamp %}
+                                    <span class="text-xs text-claude-muted">{{ msg.timestamp | short_time }}</span>
+                                    {% endif %}
+                                </div>
+                                {% if msg.role == 'assistant' and (msg.input_tokens or msg.output_tokens) %}
+                                <span class="token-badge font-mono">
+                                    in: {{ msg.input_tokens | format_tokens }} | out: {{ msg.output_tokens | format_tokens }}
+                                    {% if msg.cache_read_tokens %} | cache: {{ msg.cache_read_tokens | format_tokens }}{% endif %}
+                                </span>
                                 {% endif %}
                             </div>
                             {% if msg.content %}

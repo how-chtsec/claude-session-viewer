@@ -434,6 +434,8 @@ def _parse_subagent(subagents_dir: str, filename: str, agent_id: str) -> Optiona
                 if usage:
                     existing.input_tokens = usage.get('input_tokens', existing.input_tokens)
                     existing.output_tokens = usage.get('output_tokens', existing.output_tokens)
+                    existing.cache_read_tokens = usage.get('cache_read_input_tokens', existing.cache_read_tokens)
+                    existing.cache_creation_tokens = usage.get('cache_creation_input_tokens', existing.cache_creation_tokens)
                 existing.timestamp = timestamp
                 continue
 
@@ -450,6 +452,8 @@ def _parse_subagent(subagents_dir: str, filename: str, agent_id: str) -> Optiona
             if usage:
                 msg.input_tokens = usage.get('input_tokens', 0)
                 msg.output_tokens = usage.get('output_tokens', 0)
+                msg.cache_read_tokens = usage.get('cache_read_input_tokens', 0)
+                msg.cache_creation_tokens = usage.get('cache_creation_input_tokens', 0)
 
             for tc in tool_uses:
                 tc.timestamp = timestamp
@@ -499,19 +503,28 @@ def get_session_summary(project_dir: str, session_id: str) -> dict:
         'message_count': 0,
         'tool_call_count': 0,
         'has_subagents': False,
+        'first_prompt': '',
         'total_input_tokens': 0,
         'total_output_tokens': 0,
         'total_cache_read_tokens': 0,
         'total_cache_creation_tokens': 0,
+        'model_breakdowns': {},  # model_name -> {input, output, cache_read, cache_create}
         'team_name': '',
         'agent_name': '',
     }
 
     subagents_dir = os.path.join(project_dir, session_id, 'subagents')
-    summary['has_subagents'] = os.path.isdir(subagents_dir) and bool(os.listdir(subagents_dir))
+    if os.path.isdir(subagents_dir):
+        sa_files = [f for f in os.listdir(subagents_dir) if f.endswith('.jsonl')]
+        summary['has_subagents'] = len(sa_files) > 0
+        summary['subagent_count'] = len(sa_files)
+    else:
+        summary['has_subagents'] = False
+        summary['subagent_count'] = 0
 
     entries = parse_jsonl_file(jsonl_path)
-    seen_uuids = set()
+    seen_hashes = set()  # messageId:requestId for dedup (matches ccusage)
+    seen_uuids = set()   # fallback for entries without messageId/requestId
 
     for entry in entries:
         entry_type = entry.get('type')
@@ -537,20 +550,22 @@ def get_session_summary(project_dir: str, session_id: str) -> dict:
             if is_sidechain:
                 continue
 
-            if uuid and uuid in seen_uuids:
-                # Streaming duplicate - check for new tool calls
-                content = msg.get('content', [])
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get('type') == 'tool_use':
-                            summary['tool_call_count'] += 1
-                continue
-            if uuid:
+            # Deduplicate streaming entries by messageId:requestId (ccusage algorithm)
+            msg_id = msg.get('id')
+            req_id = entry.get('requestId')
+            if msg_id and req_id:
+                h = f'{msg_id}:{req_id}'
+                if h in seen_hashes:
+                    continue
+                seen_hashes.add(h)
+            elif uuid:
+                if uuid in seen_uuids:
+                    continue
                 seen_uuids.add(uuid)
 
             model = msg.get('model')
-            if model and not summary['model']:
-                summary['model'] = model
+            if model:
+                summary['model'] = model  # Track latest model
 
             role = msg.get('role', '')
             content = msg.get('content', [])
@@ -561,21 +576,92 @@ def get_session_summary(project_dir: str, session_id: str) -> dict:
                     isinstance(b, dict) and b.get('type') == 'tool_result' for b in content
                 )):
                     summary['message_count'] += 1
+                    # Capture first user prompt
+                    if not summary['first_prompt']:
+                        summary['first_prompt'] = _extract_text_from_content(content)[:200]
 
             elif entry_type == 'assistant' and role == 'assistant':
                 summary['message_count'] += 1
                 usage = msg.get('usage', {})
-                summary['total_input_tokens'] += usage.get('input_tokens', 0)
-                summary['total_output_tokens'] += usage.get('output_tokens', 0)
-                summary['total_cache_read_tokens'] += usage.get('cache_read_input_tokens', 0)
-                summary['total_cache_creation_tokens'] += usage.get('cache_creation_input_tokens', 0)
+                u_input = usage.get('input_tokens', 0)
+                u_output = usage.get('output_tokens', 0)
+                u_cache_read = usage.get('cache_read_input_tokens', 0)
+                u_cache_create = usage.get('cache_creation_input_tokens', 0)
+                summary['total_input_tokens'] += u_input
+                summary['total_output_tokens'] += u_output
+                summary['total_cache_read_tokens'] += u_cache_read
+                summary['total_cache_creation_tokens'] += u_cache_create
+
+                # Track per-model breakdown for accurate cost calculation
+                m_name = model or 'unknown'
+                if m_name not in summary['model_breakdowns']:
+                    summary['model_breakdowns'][m_name] = {
+                        'input': 0, 'output': 0,
+                        'cache_read': 0, 'cache_create': 0,
+                    }
+                mb = summary['model_breakdowns'][m_name]
+                mb['input'] += u_input
+                mb['output'] += u_output
+                mb['cache_read'] += u_cache_read
+                mb['cache_create'] += u_cache_create
 
                 if isinstance(content, list):
                     for block in content:
                         if isinstance(block, dict) and block.get('type') == 'tool_use':
                             summary['tool_call_count'] += 1
 
+    # Include subagent tokens in model_breakdowns for cost calculation
+    _aggregate_subagent_tokens(
+        os.path.join(project_dir, session_id, 'subagents'),
+        summary['model_breakdowns'],
+    )
+
     return summary
+
+
+def _aggregate_subagent_tokens(subagents_dir: str, model_breakdowns: dict):
+    """Aggregate token usage from subagent JSONL files into model_breakdowns.
+
+    Uses messageId:requestId deduplication matching ccusage behavior.
+    """
+    if not os.path.isdir(subagents_dir):
+        return
+
+    for sa_file in os.listdir(subagents_dir):
+        if not sa_file.endswith('.jsonl'):
+            continue
+        sa_path = os.path.join(subagents_dir, sa_file)
+        seen_hashes = set()
+        for entry in parse_jsonl_file(sa_path):
+            msg = entry.get('message', {})
+            usage = msg.get('usage')
+            if not usage or not isinstance(usage, dict):
+                continue
+            inp = usage.get('input_tokens')
+            out = usage.get('output_tokens')
+            if inp is None or out is None:
+                continue
+
+            # Deduplicate by messageId:requestId
+            msg_id = msg.get('id')
+            req_id = entry.get('requestId')
+            if msg_id and req_id:
+                h = f'{msg_id}:{req_id}'
+                if h in seen_hashes:
+                    continue
+                seen_hashes.add(h)
+
+            model = msg.get('model') or 'unknown'
+            if model not in model_breakdowns:
+                model_breakdowns[model] = {
+                    'input': 0, 'output': 0,
+                    'cache_read': 0, 'cache_create': 0,
+                }
+            mb = model_breakdowns[model]
+            mb['input'] += inp
+            mb['output'] += out
+            mb['cache_read'] += usage.get('cache_read_input_tokens', 0)
+            mb['cache_create'] += usage.get('cache_creation_input_tokens', 0)
 
 
 def parse_stats_cache() -> dict:

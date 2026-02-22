@@ -116,8 +116,11 @@
                 </div>
 
                 <!-- Total -->
-                <div class="w-20 text-right flex-shrink-0">
+                <div class="w-24 text-right flex-shrink-0">
                     <div class="text-sm font-semibold text-claude-text font-mono" title="{{ p.grand_total | format_tokens }}">{{ p.grand_total | compact_tokens }}</div>
+                    {% if p.total_cost > 0 %}
+                    <div class="text-xs text-green-400 font-mono">{{ p.total_cost | format_cost }}</div>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}
@@ -151,6 +154,7 @@
                             <span class="inline-block w-2 h-2 rounded-full bg-purple-500/70 mr-1"></span>Cache W
                         </th>
                         <th class="text-right px-4 py-3 font-medium">Total</th>
+                        <th class="text-right px-4 py-3 font-medium">Cost</th>
                         <th class="text-left px-4 py-3 font-medium w-32">Distribution</th>
                     </tr>
                 </thead>
@@ -176,6 +180,7 @@
                         <td class="px-4 py-3 text-right text-yellow-400 font-mono text-xs" title="{{ p.total_cache_read | format_tokens }}">{{ p.total_cache_read | compact_tokens }}</td>
                         <td class="px-4 py-3 text-right text-purple-400 font-mono text-xs" title="{{ p.total_cache_write | format_tokens }}">{{ p.total_cache_write | compact_tokens }}</td>
                         <td class="px-4 py-3 text-right text-claude-text font-mono text-xs font-semibold" title="{{ p.grand_total | format_tokens }}">{{ p.grand_total | compact_tokens }}</td>
+                        <td class="px-4 py-3 text-right text-green-400 font-mono text-xs">{{ p.total_cost | format_cost }}</td>
                         <td class="px-4 py-3">
                             {% if p.grand_total > 0 %}
                             <div class="flex rounded-full h-2.5 overflow-hidden bg-claude-bg w-full">
@@ -206,6 +211,8 @@
                         <td class="px-4 py-3 text-right font-semibold text-yellow-400 font-mono text-xs" title="{{ sum_cache_r | format_tokens }}">{{ sum_cache_r | compact_tokens }}</td>
                         <td class="px-4 py-3 text-right font-semibold text-purple-400 font-mono text-xs" title="{{ sum_cache_w | format_tokens }}">{{ sum_cache_w | compact_tokens }}</td>
                         <td class="px-4 py-3 text-right font-semibold text-claude-text font-mono text-xs" title="{{ sum_total | format_tokens }}">{{ sum_total | compact_tokens }}</td>
+                        {% set sum_cost = project_stats | sum(attribute='total_cost') %}
+                        <td class="px-4 py-3 text-right font-semibold text-green-400 font-mono text-xs">{{ sum_cost | format_cost }}</td>
                         <td class="px-4 py-3"></td>
                     </tr>
                 </tfoot>

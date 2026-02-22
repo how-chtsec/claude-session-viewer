@@ -77,7 +77,7 @@
             <div class="text-claude-muted text-xs uppercase tracking-wider mb-1">Grand Total</div>
             <div class="text-2xl font-bold text-claude-text font-mono" title="{{ grand_total | format_tokens }}">{{ grand_total | compact_tokens }}</div>
             {% if stats.total_cost_usd > 0 %}
-            <div class="text-xs text-green-400 mt-1">${{ "%.2f" | format(stats.total_cost_usd) }}</div>
+            <div class="text-sm text-green-400 font-semibold mt-1">{{ stats.total_cost_usd | format_cost }}</div>
             {% endif %}
         </div>
     </div>
@@ -154,10 +154,10 @@
                         <span class="text-claude-muted flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full bg-purple-500/70"></span>Cache Write</span>
                         <span class="text-claude-text font-mono" title="{{ (usage.cacheCreationInputTokens or 0) | format_tokens }}">{{ (usage.cacheCreationInputTokens or 0) | compact_tokens }}</span>
                     </div>
-                    {% if usage.costUSD is defined and usage.costUSD > 0 %}
+                    {% if usage.calculatedCost is defined and usage.calculatedCost > 0 %}
                     <div class="pt-2 mt-1 border-t border-claude-border/30 flex items-center justify-between text-xs">
                         <span class="text-claude-muted">Estimated Cost</span>
-                        <span class="text-green-400 font-medium">${{ "%.2f" | format(usage.costUSD) }}</span>
+                        <span class="text-green-400 font-medium">{{ usage.calculatedCost | format_cost }}</span>
                     </div>
                     {% endif %}
                 </div>

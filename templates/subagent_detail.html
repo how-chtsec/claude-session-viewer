@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+{% block title %}{{ subagent.member_name or subagent.agent_id[:16] }} - Subagent - Claude Viewer{% endblock %}
+
+{% block sidebar %}
+<a href="/" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text">
+    <span class="mr-2">&larr;</span>All Projects
+</a>
+<a href="/project/{{ subagent.project_dir_name }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
+    <span class="mr-2">&#128194;</span>Back to Project
+</a>
+<a href="/session/{{ subagent.project_dir_name }}/{{ subagent.session_id }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-muted hover:text-claude-text mt-1">
+    <span class="mr-2">&larr;</span>Back to Session
+</a>
+<div class="mt-3 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Subagent</div>
+    <div class="text-sm text-claude-text font-medium truncate">{{ subagent.member_name or subagent.agent_id[:16] }}</div>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .msg-user { border-left: 3px solid #0d9488; }
+    .msg-assistant { border-left: 3px solid #7c3aed; }
+    .msg-user .msg-role-badge { background: rgba(13, 148, 136, 0.15); color: #5eead4; }
+    .msg-assistant .msg-role-badge { background: rgba(124, 58, 237, 0.15); color: #c4b5fd; }
+
+    .tool-card {
+        border-left: 3px solid #4b5563;
+        transition: border-color 0.2s;
+    }
+    .tool-header { cursor: pointer; user-select: none; }
+    .tool-header:hover { background: rgba(255,255,255,0.03); }
+
+    .msg-content {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        line-height: 1.6;
+    }
+
+    .token-badge {
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(139, 137, 166, 0.15);
+        color: #8b89a6;
+    }
+
+    .copy-btn { opacity: 0; transition: opacity 0.15s; }
+    .code-wrapper:hover .copy-btn { opacity: 1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Breadcrumb -->
+    <div class="flex items-center gap-2 text-sm text-claude-muted mb-6">
+        <a href="/" class="hover:text-claude-accent2 transition-colors">Dashboard</a>
+        <span>/</span>
+        <a href="/project/{{ subagent.project_dir_name }}" class="hover:text-claude-accent2 transition-colors">Project</a>
+        <span>/</span>
+        <a href="/session/{{ subagent.project_dir_name }}/{{ subagent.session_id }}" class="hover:text-claude-accent2 transition-colors">Session</a>
+        <span>/</span>
+        <span class="text-claude-text">{{ subagent.member_name or subagent.agent_id[:16] }}</span>
+    </div>
+
+    <!-- Subagent header -->
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-6 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+            <div>
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="text-xl">&#129302;</span>
+                    <h1 class="text-xl font-bold text-claude-text">{{ subagent.member_name or subagent.agent_id[:16] }}</h1>
+                    {% if subagent.member_name %}
+                    <span class="text-xs text-claude-muted font-mono" title="{{ subagent.agent_id }}">{{ subagent.agent_id[:16] }}...</span>
+                    {% endif %}
+                    {% if subagent.team_name %}
+                    <span class="px-2.5 py-1 rounded-full bg-claude-surface2 text-claude-muted text-xs">{{ subagent.team_name }}</span>
+                    {% endif %}
+                </div>
+                <div class="flex flex-wrap items-center gap-3 text-sm">
+                    {% if subagent.model %}
+                    <span class="px-2.5 py-1 rounded-full bg-claude-accent/20 text-claude-accent2 text-xs font-medium">{{ subagent.model }}</span>
+                    {% endif %}
+                    {% if subagent.start_time %}
+                    <span class="text-claude-muted" title="{{ subagent.start_time }}">{{ subagent.start_time | time_ago }}</span>
+                    {% endif %}
+                    {% if subagent.duration_ms %}
+                    <span class="text-claude-muted">Duration: {{ subagent.duration_ms | format_duration }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex gap-4">
+                <div class="text-center">
+                    <div class="text-lg font-bold text-claude-text">{{ subagent.message_count }}</div>
+                    <div class="text-xs text-claude-muted">messages</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-lg font-bold text-claude-text">{{ subagent.tool_call_count }}</div>
+                    <div class="text-xs text-claude-muted">tools</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token usage bar -->
+        {% if subagent.total_tokens > 0 %}
+        <div class="mb-4">
+            <div class="text-xs text-claude-muted mb-2 font-medium">Token Usage</div>
+            <div class="flex rounded-full h-3 overflow-hidden bg-claude-bg">
+                {% if subagent.total_input_tokens %}
+                <div class="bg-blue-500" style="width: {{ (subagent.total_input_tokens / subagent.total_tokens * 100) }}%" title="Input: {{ subagent.total_input_tokens | format_tokens }}"></div>
+                {% endif %}
+                {% if subagent.total_output_tokens %}
+                <div class="bg-green-500" style="width: {{ (subagent.total_output_tokens / subagent.total_tokens * 100) }}%" title="Output: {{ subagent.total_output_tokens | format_tokens }}"></div>
+                {% endif %}
+                {% if subagent.total_cache_read_tokens %}
+                <div class="bg-yellow-500/70" style="width: {{ (subagent.total_cache_read_tokens / subagent.total_tokens * 100) }}%" title="Cache Read: {{ subagent.total_cache_read_tokens | format_tokens }}"></div>
+                {% endif %}
+                {% if subagent.total_cache_creation_tokens %}
+                <div class="bg-purple-500/70" style="width: {{ (subagent.total_cache_creation_tokens / subagent.total_tokens * 100) }}%" title="Cache Create: {{ subagent.total_cache_creation_tokens | format_tokens }}"></div>
+                {% endif %}
+            </div>
+            <div class="flex flex-wrap gap-4 mt-2 text-xs text-claude-muted">
+                <span><span class="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1"></span>Input: {{ subagent.total_input_tokens | format_tokens }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"></span>Output: {{ subagent.total_output_tokens | format_tokens }}</span>
+                {% if subagent.total_cache_read_tokens %}
+                <span><span class="inline-block w-2 h-2 rounded-full bg-yellow-500/70 mr-1"></span>Cache Read: {{ subagent.total_cache_read_tokens | format_tokens }}</span>
+                {% endif %}
+                {% if subagent.total_cache_creation_tokens %}
+                <span><span class="inline-block w-2 h-2 rounded-full bg-purple-500/70 mr-1"></span>Cache Create: {{ subagent.total_cache_creation_tokens | format_tokens }}</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tool usage summary -->
+        {% if subagent.tool_summary %}
+        <div>
+            <div class="text-xs text-claude-muted mb-2 font-medium">Tools Used</div>
+            <div class="flex flex-wrap gap-2">
+                {% for tool_name, info in subagent.tool_summary.items() %}
+                <span class="px-2.5 py-1 rounded-lg bg-claude-surface2 text-xs text-claude-text">
+                    {% if tool_name == 'Bash' %}&#128187;{% elif tool_name == 'Read' %}&#128214;{% elif tool_name == 'Write' %}&#9999;{% elif tool_name == 'Edit' %}&#128295;{% elif tool_name == 'Grep' %}&#128269;{% elif tool_name == 'Glob' %}&#128193;{% elif tool_name == 'Task' %}&#129302;{% elif tool_name == 'WebFetch' %}&#127760;{% elif tool_name == 'WebSearch' %}&#128270;{% elif tool_name == 'SendMessage' %}&#128172;{% else %}&#9889;{% endif %}
+                    {{ tool_name }}
+                    <span class="text-claude-muted ml-1">&times;{{ info.count }}</span>
+                    {% if info.total_duration_ms %}
+                    <span class="text-claude-muted ml-1">({{ info.total_duration_ms | format_duration }})</span>
+                    {% endif %}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Full prompt (collapsible) -->
+    {% if subagent.prompt %}
+    <div class="bg-claude-surface rounded-xl border border-claude-border p-5 mb-6">
+        <button onclick="toggleCollapse('prompt-body')" class="flex items-center gap-2 w-full text-left">
+            <svg id="icon-prompt-body" class="w-4 h-4 text-claude-muted transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+            </svg>
+            <span class="text-sm font-medium text-claude-text">Agent Prompt</span>
+            <span class="text-xs text-claude-muted ml-2">({{ subagent.prompt | length }} chars)</span>
+        </button>
+        <div id="prompt-body" class="collapsible-body">
+            <div class="mt-3 pt-3 border-t border-claude-border/30">
+                <div class="msg-content text-sm text-claude-text">{{ subagent.prompt }}</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Message timeline -->
+    <h2 class="text-lg font-semibold text-claude-text mb-4">Message Timeline</h2>
+    <div id="timeline" class="space-y-4">
+        {% for msg in subagent.messages %}
+        {% set msg_idx = loop.index0 %}
+        <div class="message-block fade-in" data-index="{{ msg_idx }}" data-role="{{ msg.role }}">
+            {% if msg.role == 'user' %}
+            <!-- User message -->
+            <div class="msg-user bg-claude-surface rounded-xl p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">User</span>
+                        {% if msg.timestamp %}
+                        <span class="text-xs text-claude-muted" title="{{ msg.timestamp }}">{{ msg.timestamp | short_time }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="msg-content text-sm text-claude-text">{{ msg.content }}</div>
+            </div>
+
+            {% elif msg.role == 'assistant' %}
+            <!-- Assistant message -->
+            <div class="msg-assistant bg-claude-surface rounded-xl p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="msg-role-badge px-2 py-0.5 rounded text-xs font-medium">Assistant</span>
+                        {% if msg.model %}
+                        <span class="text-xs text-claude-muted">{{ msg.model }}</span>
+                        {% endif %}
+                        {% if msg.timestamp %}
+                        <span class="text-xs text-claude-muted" title="{{ msg.timestamp }}">{{ msg.timestamp | short_time }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        {% if msg.input_tokens or msg.output_tokens %}
+                        <span class="token-badge font-mono">
+                            in: {{ msg.input_tokens | format_tokens }} | out: {{ msg.output_tokens | format_tokens }}
+                            {% if msg.cache_read_tokens %} | cache: {{ msg.cache_read_tokens | format_tokens }}{% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Content -->
+                {% if msg.content %}
+                <div class="msg-content text-sm text-claude-text mb-4">{{ msg.content }}</div>
+                {% endif %}
+
+                <!-- Tool calls -->
+                {% if msg.tool_calls %}
+                <div class="space-y-2 mt-3">
+                    {% for tc in msg.tool_calls %}
+                    <div class="tool-card tool-border-{{ tc.tool_name }} rounded-lg bg-claude-bg/50 overflow-hidden">
+                        <div class="tool-header flex items-center justify-between px-4 py-2.5" onclick="toggleCollapse('tool-{{ msg_idx }}-{{ loop.index0 }}')">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <svg id="icon-tool-{{ msg_idx }}-{{ loop.index0 }}" class="w-3 h-3 text-claude-muted transition-transform flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                </svg>
+                                <span class="text-sm flex-shrink-0">
+                                    {% if tc.tool_name == 'Bash' %}&#128187;{% elif tc.tool_name == 'Read' %}&#128214;{% elif tc.tool_name == 'Write' %}&#9999;{% elif tc.tool_name == 'Edit' %}&#128295;{% elif tc.tool_name == 'Grep' %}&#128269;{% elif tc.tool_name == 'Glob' %}&#128193;{% elif tc.tool_name == 'Task' %}&#129302;{% elif tc.tool_name == 'WebFetch' %}&#127760;{% elif tc.tool_name == 'WebSearch' %}&#128270;{% elif tc.tool_name == 'SendMessage' %}&#128172;{% else %}&#9889;{% endif %}
+                                </span>
+                                <span class="text-sm font-medium text-claude-text flex-shrink-0">{{ tc.tool_name }}</span>
+                                <span class="text-xs text-claude-muted truncate">{{ tc.input_params }}</span>
+                            </div>
+                            {% if tc.duration_ms %}
+                            <span class="text-xs text-claude-muted flex-shrink-0 ml-2">{{ tc.duration_ms | format_duration }}</span>
+                            {% endif %}
+                        </div>
+
+                        <div id="tool-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                            <div class="px-4 pb-3 border-t border-claude-border/30">
+                                {% if tc.input_params_raw %}
+                                <div class="mt-3">
+                                    <button onclick="toggleCollapse('input-{{ msg_idx }}-{{ loop.index0 }}')" class="text-xs text-claude-muted hover:text-claude-text transition-colors mb-1 flex items-center gap-1">
+                                        <svg id="icon-input-{{ msg_idx }}-{{ loop.index0 }}" class="w-2.5 h-2.5 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                        </svg>
+                                        Input Parameters
+                                    </button>
+                                    <div id="input-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body">
+                                        <div class="code-wrapper relative">
+                                            <button class="copy-btn absolute top-2 right-2 px-2 py-1 text-xs bg-claude-surface2 text-claude-muted rounded hover:text-claude-text" onclick="copyText(this)">Copy</button>
+                                            <pre class="mt-1 text-xs overflow-x-auto max-h-96"><code class="language-json">{{ tc.input_params_raw | tojson(indent=2) }}</code></pre>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                {% if tc.output_result %}
+                                <div class="mt-3">
+                                    <button onclick="toggleCollapse('output-{{ msg_idx }}-{{ loop.index0 }}')" class="text-xs text-claude-muted hover:text-claude-text transition-colors mb-1 flex items-center gap-1">
+                                        <svg id="icon-output-{{ msg_idx }}-{{ loop.index0 }}" class="w-2.5 h-2.5 transition-transform rotate-90" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                                        </svg>
+                                        Output
+                                    </button>
+                                    <div id="output-{{ msg_idx }}-{{ loop.index0 }}" class="collapsible-body expanded">
+                                        <div class="code-wrapper relative">
+                                            <button class="copy-btn absolute top-2 right-2 px-2 py-1 text-xs bg-claude-surface2 text-claude-muted rounded hover:text-claude-text" onclick="copyText(this)">Copy</button>
+                                            <pre class="mt-1 text-xs overflow-x-auto max-h-96 overflow-y-auto"><code>{{ tc.output_result }}</code></pre>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function copyText(btn) {
+        var wrapper = btn.closest('.code-wrapper');
+        var code = wrapper.querySelector('code');
+        if (code) {
+            navigator.clipboard.writeText(code.textContent).then(function() {
+                btn.textContent = 'Copied!';
+                setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('pre code').forEach(function(block) {
+            hljs.highlightElement(block);
+        });
+    });
+</script>
+{% endblock %}

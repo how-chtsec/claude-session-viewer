@@ -20,6 +20,7 @@ from .parser import (
     parse_session,
     parse_stats_cache,
 )
+from .pricing import calculate_cost, calculate_session_cost
 
 
 def list_projects() -> list[dict]:
@@ -141,35 +142,30 @@ def get_session_detail(project_dir_name: str, session_id: str) -> Optional[dict]
 
         timeline.append(entry)
 
-    # Build subagent data
+    # Build subagent data using shared helper
     subagents = []
+    agent_map = get_session_agent_map()
     for sa in session.subagents:
-        sa_data = {
-            'agent_id': sa.agent_id,
-            'prompt': _truncate(sa.prompt, 500),
-            'model': sa.model,
-            'start_time': sa.start_time,
-            'end_time': sa.end_time,
-            'message_count': len(sa.messages),
-            'messages': [],
-        }
-        for msg in sa.messages:
-            sa_msg = {
-                'role': msg.role,
-                'content': msg.content_text,
-                'timestamp': msg.timestamp,
-                'model': msg.model,
-                'tool_calls': [],
-            }
-            for tc in msg.tool_calls:
-                sa_msg['tool_calls'].append({
-                    'tool_name': tc.tool_name,
-                    'input_params': _summarize_tool_input(tc.tool_name, tc.input_params),
-                    'input_params_raw': tc.input_params,
-                    'output_result': _truncate(tc.output_result, 3000),
-                    'timestamp': tc.timestamp,
-                })
-            sa_data['messages'].append(sa_msg)
+        sa_data = _subagent_to_dict(sa)
+        # Enrich with team member name
+        info = agent_map.get(sa.agent_id)
+        if info:
+            sa_data['member_name'] = info.get('agent_name', '')
+            sa_data['team_name'] = info.get('team_name', '')
+        else:
+            sa_data['member_name'] = ''
+            sa_data['team_name'] = ''
+        # Compute total tokens for summary cards
+        sa_input = sum(m.get('input_tokens', 0) for m in sa_data['messages'])
+        sa_output = sum(m.get('output_tokens', 0) for m in sa_data['messages'])
+        sa_cache_read = sum(m.get('cache_read_tokens', 0) for m in sa_data['messages'])
+        sa_cache_creation = sum(m.get('cache_creation_tokens', 0) for m in sa_data['messages'])
+        sa_data['total_input_tokens'] = sa_input
+        sa_data['total_output_tokens'] = sa_output
+        sa_data['total_cache_read_tokens'] = sa_cache_read
+        sa_data['total_cache_creation_tokens'] = sa_cache_creation
+        sa_data['total_tokens'] = sa_input + sa_output + sa_cache_read + sa_cache_creation
+        sa_data['tool_call_count'] = sum(len(m.get('tool_calls', [])) for m in sa_data['messages'])
         subagents.append(sa_data)
 
     # Compute tool usage summary
@@ -229,20 +225,40 @@ def get_global_stats() -> dict:
             'daily_model_tokens': [],
         }
 
-    # Compute aggregate token totals across all models
+    # Compute aggregate token totals across all models from stats-cache
     model_usage = stats.get('modelUsage', {})
     total_input = 0
     total_output = 0
     total_cache_read = 0
     total_cache_create = 0
-    total_cost = 0.0
     for model_name, usage in model_usage.items():
         if isinstance(usage, dict):
             total_input += usage.get('inputTokens', 0)
             total_output += usage.get('outputTokens', 0)
             total_cache_read += usage.get('cacheReadInputTokens', 0)
             total_cache_create += usage.get('cacheCreationInputTokens', 0)
-            total_cost += usage.get('costUSD', 0)
+            # Calculate cost per model using base rates
+            model_cost = calculate_cost(
+                model_name,
+                input_tokens=usage.get('inputTokens', 0),
+                output_tokens=usage.get('outputTokens', 0),
+                cache_creation_tokens=usage.get('cacheCreationInputTokens', 0),
+                cache_read_tokens=usage.get('cacheReadInputTokens', 0),
+            )
+            usage['calculatedCost'] = model_cost
+
+    # Calculate accurate total cost from JSONL data (per-model per-session)
+    # stats-cache.json may misattribute tokens across models
+    total_cost = 0.0
+    if PROJECTS_DIR.is_dir():
+        for dir_name in os.listdir(PROJECTS_DIR):
+            project_path = PROJECTS_DIR / dir_name
+            if not project_path.is_dir():
+                continue
+            session_ids = get_session_ids(str(project_path))
+            for sid in session_ids:
+                s = get_session_summary(str(project_path), sid)
+                total_cost += calculate_session_cost(s.get('model_breakdowns', {}))
 
     return {
         'total_sessions': stats.get('totalSessions', 0),
@@ -309,6 +325,11 @@ def get_project_token_stats() -> list[dict]:
         total_messages = sum(s.get('message_count', 0) for s in sessions)
         total_tools = sum(s.get('tool_call_count', 0) for s in sessions)
 
+        # Calculate cost from per-model breakdowns
+        proj_cost = 0.0
+        for s in sessions:
+            proj_cost += calculate_session_cost(s.get('model_breakdowns', {}))
+
         result.append({
             'name': proj['name'],
             'dir_name': proj['dir_name'],
@@ -322,6 +343,7 @@ def get_project_token_stats() -> list[dict]:
             'grand_total': grand_total,
             'total_messages': total_messages,
             'total_tools': total_tools,
+            'total_cost': proj_cost,
         })
 
     result.sort(key=lambda p: p['grand_total'], reverse=True)
@@ -350,6 +372,7 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
     grand_total = total_input + total_output + total_cache_read + total_cache_write
     total_messages = sum(s.get('message_count', 0) for s in sessions)
     total_tools = sum(s.get('tool_call_count', 0) for s in sessions)
+    total_cost = 0.0
 
     # Per-session token breakdown (sorted by total tokens desc)
     session_rows = []
@@ -359,6 +382,8 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         s_cache_read = s.get('total_cache_read_tokens', 0)
         s_cache_write = s.get('total_cache_creation_tokens', 0)
         s_total = s_input + s_output + s_cache_read + s_cache_write
+        s_cost = calculate_session_cost(s.get('model_breakdowns', {}))
+        total_cost += s_cost
         session_rows.append({
             'session_id': s['session_id'],
             'slug': s.get('slug', ''),
@@ -373,17 +398,20 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
             'cache_read_tokens': s_cache_read,
             'cache_write_tokens': s_cache_write,
             'total_tokens': s_total,
+            'cost': s_cost,
         })
     session_rows.sort(key=lambda r: r['total_tokens'], reverse=True)
 
     # Per-model aggregation
     model_stats = {}
+    # Build a session cost lookup from session_rows
+    session_cost_by_id = {r['session_id']: r['cost'] for r in session_rows}
     for s in sessions:
         model = s.get('model') or 'unknown'
         if model not in model_stats:
             model_stats[model] = {
                 'input': 0, 'output': 0, 'cache_read': 0,
-                'cache_write': 0, 'total': 0,
+                'cache_write': 0, 'total': 0, 'cost': 0.0,
                 'session_count': 0, 'message_count': 0,
             }
         ms = model_stats[model]
@@ -398,6 +426,7 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         ms['total'] += s_input + s_output + s_cache_read + s_cache_write
         ms['session_count'] += 1
         ms['message_count'] += s.get('message_count', 0)
+        ms['cost'] += session_cost_by_id.get(s['session_id'], 0.0)
 
     # Sort models by total tokens desc
     model_list = [
@@ -407,6 +436,7 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
 
     # Daily token aggregation
     daily_stats = {}
+    daily_models: dict[str, dict[str, str]] = {}  # date -> {model -> model_name} for cost calc
     for s in sessions:
         start = s.get('start_time')
         if not start:
@@ -418,7 +448,7 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         if date_str not in daily_stats:
             daily_stats[date_str] = {
                 'input': 0, 'output': 0, 'cache_read': 0,
-                'cache_write': 0, 'total': 0,
+                'cache_write': 0, 'total': 0, 'cost': 0.0,
                 'session_count': 0, 'message_count': 0,
             }
         ds = daily_stats[date_str]
@@ -433,6 +463,7 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         ds['total'] += s_input + s_output + s_cache_read + s_cache_write
         ds['session_count'] += 1
         ds['message_count'] += s.get('message_count', 0)
+        ds['cost'] += calculate_session_cost(s.get('model_breakdowns', {}))
 
     daily_list = [
         {'date': date, **stats}
@@ -448,6 +479,7 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         'grand_total': grand_total,
         'total_messages': total_messages,
         'total_tools': total_tools,
+        'total_cost': total_cost,
         'session_count': len(sessions),
         'sessions': session_rows,
         'models': model_list,
@@ -556,6 +588,162 @@ def _truncate(text: str, max_len: int) -> str:
     if not text or len(text) <= max_len:
         return text
     return text[:max_len] + '...'
+
+
+# ---------------------------------------------------------------------------
+# Subagent detail
+# ---------------------------------------------------------------------------
+
+
+def get_subagent_detail(project_dir_name: str, session_id: str, agent_id: str) -> Optional[dict]:
+    """Get full detail for a specific subagent within a session."""
+    from .parser import _parse_subagent
+
+    project_path = PROJECTS_DIR / project_dir_name
+    subagents_dir = project_path / session_id / 'subagents'
+    if not subagents_dir.is_dir():
+        return None
+
+    # Find the subagent file
+    sa_file = f'agent-{agent_id}.jsonl'
+    sa_path = subagents_dir / sa_file
+    if not sa_path.is_file():
+        # Try without agent- prefix
+        sa_file = f'{agent_id}.jsonl'
+        sa_path = subagents_dir / sa_file
+        if not sa_path.is_file():
+            return None
+
+    sa = _parse_subagent(str(subagents_dir), sa_file, agent_id)
+    if not sa:
+        return None
+
+    sa_data = _subagent_to_dict(sa)
+    # Include full prompt (not truncated)
+    sa_data['prompt'] = sa.prompt
+
+    # Resolve member name
+    agent_map = get_session_agent_map()
+    info = agent_map.get(agent_id)
+    if info:
+        sa_data['member_name'] = info.get('agent_name', '')
+        sa_data['team_name'] = info.get('team_name', '')
+    else:
+        sa_data['member_name'] = ''
+        sa_data['team_name'] = ''
+
+    # Compute totals
+    sa_data['total_input_tokens'] = sum(m.get('input_tokens', 0) for m in sa_data['messages'])
+    sa_data['total_output_tokens'] = sum(m.get('output_tokens', 0) for m in sa_data['messages'])
+    sa_data['total_cache_read_tokens'] = sum(m.get('cache_read_tokens', 0) for m in sa_data['messages'])
+    sa_data['total_cache_creation_tokens'] = sum(m.get('cache_creation_tokens', 0) for m in sa_data['messages'])
+    sa_data['total_tokens'] = (sa_data['total_input_tokens'] + sa_data['total_output_tokens'] +
+                                sa_data['total_cache_read_tokens'] + sa_data['total_cache_creation_tokens'])
+    sa_data['tool_call_count'] = sum(len(m.get('tool_calls', [])) for m in sa_data['messages'])
+
+    # Compute duration
+    sa_data['duration_ms'] = None
+    if sa_data.get('start_time') and sa_data.get('end_time'):
+        try:
+            start = datetime.fromisoformat(sa_data['start_time'].replace('Z', '+00:00'))
+            end = datetime.fromisoformat(sa_data['end_time'].replace('Z', '+00:00'))
+            sa_data['duration_ms'] = (end - start).total_seconds() * 1000
+        except (ValueError, TypeError):
+            pass
+
+    # Tool usage summary
+    tool_summary = {}
+    for msg_dict in sa_data['messages']:
+        for tc in msg_dict.get('tool_calls', []):
+            name = tc['tool_name']
+            if name not in tool_summary:
+                tool_summary[name] = {'count': 0, 'total_duration_ms': 0}
+            tool_summary[name]['count'] += 1
+            if tc.get('duration_ms'):
+                tool_summary[name]['total_duration_ms'] += tc['duration_ms']
+    sa_data['tool_summary'] = tool_summary
+
+    # Session context
+    sa_data['session_id'] = session_id
+    sa_data['project_dir_name'] = project_dir_name
+
+    return sa_data
+
+
+# ---------------------------------------------------------------------------
+# Session date grouping
+# ---------------------------------------------------------------------------
+
+
+def group_sessions_by_date(sessions: list[dict]) -> list[dict]:
+    """Group sessions by date (YYYY-MM-DD from start_time).
+
+    Returns list of groups sorted newest-first:
+    [{ date: '2026-02-22', display: 'Today', sessions: [...], summary: {...} }, ...]
+    """
+    from datetime import date as date_type
+
+    groups: dict[str, list[dict]] = {}
+    for s in sessions:
+        start = s.get('start_time')
+        if not start:
+            date_str = 'unknown'
+        else:
+            try:
+                date_str = start[:10]
+            except (TypeError, IndexError):
+                date_str = 'unknown'
+        groups.setdefault(date_str, []).append(s)
+
+    today = date_type.today()
+    result = []
+    # Sort keys: real dates newest-first, 'unknown' last
+    sorted_keys = sorted(
+        groups.keys(),
+        key=lambda k: ('1' + k) if k == 'unknown' else ('0' + k),
+        reverse=True,
+    )
+    # 'unknown' ends up first after reverse due to '1' prefix; move to end
+    if 'unknown' in groups:
+        sorted_keys = [k for k in sorted_keys if k != 'unknown'] + ['unknown']
+    for date_str, date_sessions in ((k, groups[k]) for k in sorted_keys):
+        # Compute display label
+        display = date_str
+        if date_str != 'unknown':
+            try:
+                d = date_type.fromisoformat(date_str)
+                delta = (today - d).days
+                if delta == 0:
+                    display = 'Today'
+                elif delta == 1:
+                    display = 'Yesterday'
+                elif delta < 7:
+                    display = d.strftime('%A')  # Day name
+                else:
+                    display = d.strftime('%b %d, %Y')
+            except ValueError:
+                pass
+
+        # Compute summary for this group
+        total_tokens = sum(
+            s.get('total_input_tokens', 0) + s.get('total_output_tokens', 0) +
+            s.get('total_cache_read_tokens', 0) + s.get('total_cache_creation_tokens', 0)
+            for s in date_sessions
+        )
+        total_messages = sum(s.get('message_count', 0) for s in date_sessions)
+
+        result.append({
+            'date': date_str,
+            'display': display,
+            'sessions': date_sessions,
+            'summary': {
+                'session_count': len(date_sessions),
+                'total_tokens': total_tokens,
+                'total_messages': total_messages,
+            },
+        })
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -871,6 +1059,8 @@ def _subagent_to_dict(sa) -> dict:
             'model': msg.model,
             'input_tokens': msg.input_tokens,
             'output_tokens': msg.output_tokens,
+            'cache_read_tokens': msg.cache_read_tokens,
+            'cache_creation_tokens': msg.cache_creation_tokens,
             'tool_calls': [],
         }
         for tc in msg.tool_calls:

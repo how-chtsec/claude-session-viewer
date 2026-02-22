@@ -53,7 +53,7 @@
     </div>
 
     <!-- Token overview cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
         <div class="stat-card rounded-xl p-5">
             <div class="text-claude-muted text-xs uppercase tracking-wider mb-1">Input</div>
             <div class="text-2xl font-bold text-blue-400 font-mono" title="{{ total_input | format_tokens }}">{{ total_input | compact_tokens }}</div>
@@ -73,6 +73,10 @@
         <div class="stat-card rounded-xl p-5">
             <div class="text-claude-muted text-xs uppercase tracking-wider mb-1">Grand Total</div>
             <div class="text-2xl font-bold text-claude-text font-mono" title="{{ grand_total | format_tokens }}">{{ grand_total | compact_tokens }}</div>
+        </div>
+        <div class="stat-card rounded-xl p-5">
+            <div class="text-claude-muted text-xs uppercase tracking-wider mb-1">Est. Cost</div>
+            <div class="text-2xl font-bold text-green-400 font-mono">{{ total_cost | format_cost }}</div>
         </div>
     </div>
 
@@ -149,11 +153,14 @@
                     </div>
                 </div>
 
-                {% if grand_total > 0 %}
-                <div class="mt-3 pt-3 border-t border-claude-border/30 text-xs text-claude-muted">
-                    {{ "%.1f" | format(m.total / grand_total * 100) }}% of project total
+                <div class="mt-3 pt-3 border-t border-claude-border/30 flex items-center justify-between text-xs text-claude-muted">
+                    {% if grand_total > 0 %}
+                    <span>{{ "%.1f" | format(m.total / grand_total * 100) }}% of project total</span>
+                    {% endif %}
+                    {% if m.cost > 0 %}
+                    <span class="text-green-400 font-medium">{{ m.cost | format_cost }}</span>
+                    {% endif %}
                 </div>
-                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -211,6 +218,7 @@
                                 <span class="inline-block w-2 h-2 rounded-full bg-purple-500/70 mr-1"></span>Cache W
                             </th>
                             <th class="text-right px-4 py-2 font-medium">Total</th>
+                            <th class="text-right px-4 py-2 font-medium">Cost</th>
                             <th class="text-left px-4 py-2 font-medium w-28">Distribution</th>
                         </tr>
                     </thead>
@@ -225,6 +233,7 @@
                             <td class="px-4 py-2.5 text-right text-yellow-400 font-mono text-xs" title="{{ d.cache_read | format_tokens }}">{{ d.cache_read | compact_tokens }}</td>
                             <td class="px-4 py-2.5 text-right text-purple-400 font-mono text-xs" title="{{ d.cache_write | format_tokens }}">{{ d.cache_write | compact_tokens }}</td>
                             <td class="px-4 py-2.5 text-right text-claude-text font-mono text-xs font-semibold" title="{{ d.total | format_tokens }}">{{ d.total | compact_tokens }}</td>
+                            <td class="px-4 py-2.5 text-right text-green-400 font-mono text-xs">{{ d.cost | format_cost }}</td>
                             <td class="px-4 py-2.5">
                                 {% if d.total > 0 %}
                                 <div class="flex rounded-full h-2.5 overflow-hidden bg-claude-bg w-full">
@@ -272,6 +281,7 @@
                                 <span class="inline-block w-2 h-2 rounded-full bg-purple-500/70 mr-1"></span>Cache W
                             </th>
                             <th class="text-right px-4 py-3 font-medium">Total</th>
+                            <th class="text-right px-4 py-3 font-medium">Cost</th>
                             <th class="text-left px-4 py-3 font-medium w-32">Usage</th>
                         </tr>
                     </thead>
@@ -312,6 +322,7 @@
                             <td class="px-4 py-3 text-right text-yellow-400 font-mono text-xs" title="{{ s.cache_read_tokens | format_tokens }}">{{ s.cache_read_tokens | compact_tokens }}</td>
                             <td class="px-4 py-3 text-right text-purple-400 font-mono text-xs" title="{{ s.cache_write_tokens | format_tokens }}">{{ s.cache_write_tokens | compact_tokens }}</td>
                             <td class="px-4 py-3 text-right text-claude-text font-mono text-xs font-semibold" title="{{ s.total_tokens | format_tokens }}">{{ s.total_tokens | compact_tokens }}</td>
+                            <td class="px-4 py-3 text-right text-green-400 font-mono text-xs">{{ s.cost | format_cost }}</td>
                             <td class="px-4 py-3">
                                 {% if s.total_tokens > 0 %}
                                 <div class="flex rounded h-3 overflow-hidden bg-claude-bg" style="width: {{ (s.total_tokens / max_session_total * 100) }}%; min-width: 4px;">
@@ -337,6 +348,7 @@
                             <td class="px-4 py-3 text-right font-semibold text-yellow-400 font-mono text-xs" title="{{ total_cache_read | format_tokens }}">{{ total_cache_read | compact_tokens }}</td>
                             <td class="px-4 py-3 text-right font-semibold text-purple-400 font-mono text-xs" title="{{ total_cache_write | format_tokens }}">{{ total_cache_write | compact_tokens }}</td>
                             <td class="px-4 py-3 text-right font-semibold text-claude-text font-mono text-xs" title="{{ grand_total | format_tokens }}">{{ grand_total | compact_tokens }}</td>
+                            <td class="px-4 py-3 text-right font-semibold text-green-400 font-mono text-xs">{{ total_cost | format_cost }}</td>
                             <td class="px-4 py-3"></td>
                         </tr>
                     </tfoot>

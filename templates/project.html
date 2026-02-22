@@ -85,52 +85,82 @@
         {% endif %}
     </div>
 
-    <!-- Sessions list -->
+    <!-- Sessions list grouped by date -->
     <h2 class="text-lg font-semibold text-claude-text mb-4">Sessions</h2>
 
-    {% if sessions %}
-    <div class="space-y-3">
-        {% for s in sessions %}
-        <a href="/session/{{ project.dir_name }}/{{ s.session_id }}" class="block bg-claude-surface rounded-xl border border-claude-border p-5 hover:border-claude-accent transition-all group">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                        <h3 class="font-semibold text-claude-text group-hover:text-claude-accent2 transition-colors truncate">
-                            {{ s.slug or s.session_id[:12] }}
-                        </h3>
-                        {% if s.agent_name %}
-                        <span class="px-1.5 py-0.5 text-xs bg-yellow-500/15 text-yellow-300 rounded flex-shrink-0 hover:bg-yellow-500/25 transition-colors cursor-pointer" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/team/{{ s.team_name }}/member/{{ s.agent_name }}';" title="Team: {{ s.team_name }}">{{ s.agent_name }}</span>
-                        {% endif %}
-                        {% if s.has_subagents %}
-                        <span class="px-1.5 py-0.5 text-xs bg-purple-500/20 text-purple-300 rounded flex-shrink-0">🤖 subagents</span>
-                        {% endif %}
-                    </div>
-                    <div class="flex flex-wrap items-center gap-3 text-xs text-claude-muted">
-                        <span title="{{ s.start_time }}">{{ s.start_time | time_ago }}</span>
-                        {% if s.model %}
-                        <span class="px-2 py-0.5 rounded-full bg-claude-surface2">{{ s.model }}</span>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="flex items-center gap-4 text-sm flex-shrink-0">
-                    <div class="text-center">
-                        <div class="font-semibold text-claude-text">{{ s.message_count }}</div>
-                        <div class="text-xs text-claude-muted">messages</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="font-semibold text-claude-text">{{ s.tool_call_count }}</div>
-                        <div class="text-xs text-claude-muted">tools</div>
-                    </div>
-                    <div class="text-center" title="Input: {{ s.total_input_tokens | format_tokens }}&#10;Output: {{ s.total_output_tokens | format_tokens }}&#10;Cache: {{ s.total_cache_read_tokens | format_tokens }}">
-                        <div class="font-semibold text-claude-text font-mono text-xs">{{ s.total_input_tokens | compact_tokens }} / {{ s.total_output_tokens | compact_tokens }}</div>
-                        <div class="text-xs text-claude-muted">in / out</div>
-                    </div>
-                    <svg class="w-5 h-5 text-claude-muted group-hover:text-claude-accent2 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+    {% if date_groups %}
+    <div class="space-y-4">
+        {% for group in date_groups %}
+        <div class="date-group">
+            <!-- Date header (collapsible) -->
+            <button onclick="toggleDateGroup('date-{{ group.date }}')" class="w-full flex items-center justify-between px-4 py-3 bg-claude-surface rounded-t-xl border border-claude-border hover:border-claude-accent/50 transition-colors">
+                <div class="flex items-center gap-3">
+                    <svg id="icon-date-{{ group.date }}" class="w-4 h-4 text-claude-muted transition-transform {% if loop.first %}rotate-90{% endif %}" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
                     </svg>
+                    <span class="text-sm font-semibold text-claude-text">{{ group.display }}</span>
+                    {% if group.display != group.date and group.date != 'unknown' %}
+                    <span class="text-xs text-claude-muted">{{ group.date }}</span>
+                    {% endif %}
                 </div>
+                <div class="flex items-center gap-4 text-xs text-claude-muted">
+                    <span>{{ group.summary.session_count }} session{{ 's' if group.summary.session_count != 1 }}</span>
+                    <span>{{ group.summary.total_messages }} msgs</span>
+                    {% if group.summary.total_tokens %}
+                    <span class="font-mono">{{ group.summary.total_tokens | compact_tokens }} tok</span>
+                    {% endif %}
+                </div>
+            </button>
+
+            <!-- Sessions in this date group -->
+            <div id="date-{{ group.date }}" class="date-group-body border-x border-b border-claude-border rounded-b-xl overflow-hidden {% if not loop.first %}collapsed{% endif %}">
+                {% for s in group.sessions %}
+                <a href="/session/{{ project.dir_name }}/{{ s.session_id }}" class="block bg-claude-surface p-5 hover:bg-claude-surface2/30 transition-all group {% if not loop.last %}border-b border-claude-border/30{% endif %}">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <h3 class="font-semibold text-claude-text group-hover:text-claude-accent2 transition-colors truncate">
+                                    {{ s.slug or s.session_id[:12] }}
+                                </h3>
+                                {% if s.agent_name %}
+                                <span class="px-1.5 py-0.5 text-xs bg-yellow-500/15 text-yellow-300 rounded flex-shrink-0 hover:bg-yellow-500/25 transition-colors cursor-pointer" onclick="event.preventDefault(); event.stopPropagation(); window.location.href='/team/{{ s.team_name }}/member/{{ s.agent_name }}';" title="Team: {{ s.team_name }}">{{ s.agent_name }}</span>
+                                {% endif %}
+                                {% if s.has_subagents %}
+                                <span class="px-1.5 py-0.5 text-xs bg-purple-500/20 text-purple-300 rounded flex-shrink-0">🤖 {{ s.subagent_count }} subagent{{ 's' if s.subagent_count != 1 }}</span>
+                                {% endif %}
+                            </div>
+                            {% if s.first_prompt %}
+                            <div class="text-xs text-claude-muted truncate mt-1" title="{{ s.first_prompt }}">{{ s.first_prompt }}</div>
+                            {% endif %}
+                            <div class="flex flex-wrap items-center gap-3 text-xs text-claude-muted mt-1">
+                                <span title="{{ s.start_time }}">{{ s.start_time | time_ago }}</span>
+                                {% if s.model %}
+                                <span class="px-2 py-0.5 rounded-full bg-claude-surface2">{{ s.model }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4 text-sm flex-shrink-0">
+                            <div class="text-center">
+                                <div class="font-semibold text-claude-text">{{ s.message_count }}</div>
+                                <div class="text-xs text-claude-muted">messages</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="font-semibold text-claude-text">{{ s.tool_call_count }}</div>
+                                <div class="text-xs text-claude-muted">tools</div>
+                            </div>
+                            <div class="text-center" title="Input: {{ s.total_input_tokens | format_tokens }}&#10;Output: {{ s.total_output_tokens | format_tokens }}&#10;Cache: {{ s.total_cache_read_tokens | format_tokens }}">
+                                <div class="font-semibold text-claude-text font-mono text-xs">{{ s.total_input_tokens | compact_tokens }} / {{ s.total_output_tokens | compact_tokens }}</div>
+                                <div class="text-xs text-claude-muted">in / out</div>
+                            </div>
+                            <svg class="w-5 h-5 text-claude-muted group-hover:text-claude-accent2 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
             </div>
-        </a>
+        </div>
         {% endfor %}
     </div>
     {% else %}
@@ -139,4 +169,33 @@
     </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block head %}
+<style>
+    .date-group-body {
+        max-height: 5000px;
+        overflow: hidden;
+        transition: max-height 0.3s ease-in;
+    }
+    .date-group-body.collapsed {
+        max-height: 0;
+        transition: max-height 0.3s ease-out;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleDateGroup(id) {
+        var el = document.getElementById(id);
+        var icon = document.getElementById('icon-' + id);
+        if (el) {
+            el.classList.toggle('collapsed');
+            if (icon) {
+                icon.style.transform = el.classList.contains('collapsed') ? 'rotate(0deg)' : 'rotate(90deg)';
+            }
+        }
+    }
+</script>
 {% endblock %}
