@@ -175,15 +175,15 @@
         <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden">
             <!-- Visual bar chart -->
             <div class="p-5 border-b border-claude-border">
-                {% set max_daily_total = stats.daily_usage | map(attribute='total') | max %}
+                {% set max_daily_cost = stats.daily_usage | map(attribute='cost') | max or 1 %}
                 <div class="flex items-end gap-1" style="height: 120px;">
                     {% for day in stats.daily_usage %}
-                    {% set bar_height = (day.total / max_daily_total * 100) if max_daily_total > 0 else 0 %}
+                    {% set bar_px = (day.cost / max_daily_cost * 100)|round|int if max_daily_cost > 0 else 2 %}
                     <div class="flex-1 flex flex-col items-center gap-1 group relative" style="min-width: 0;">
                         <div class="hidden group-hover:block absolute -top-8 text-xs bg-claude-surface2 px-2 py-1 rounded whitespace-nowrap z-10">
                             {{ day.date }}: {{ day.total | compact_tokens }} · {{ day.cost | format_cost }}
                         </div>
-                        <div class="w-full rounded-t bg-claude-accent/60 hover:bg-claude-accent transition-colors" style="height: {{ bar_height }}%; min-height: 2px;"></div>
+                        <div class="w-full rounded-t bg-claude-accent/60 hover:bg-claude-accent transition-colors" style="height: {{ bar_px }}px; min-height: 2px;"></div>
                         <span class="text-xs text-claude-muted truncate w-full text-center hidden sm:block" style="font-size: 0.6rem;">{{ day.date[5:] }}</span>
                     </div>
                     {% endfor %}
@@ -286,12 +286,12 @@
             <div class="flex items-end gap-0.5" style="height: 80px;">
                 {% for h in range(24) %}
                 {% set count = stats.hour_counts.get(h|string, 0) %}
-                {% set bar_h = (count / max_hour * 100) if max_hour > 0 else 0 %}
+                {% set bar_px = (count / max_hour * 70)|round|int if max_hour > 0 else 0 %}
                 <div class="flex-1 flex flex-col items-center group relative" style="min-width: 0;">
                     <div class="hidden group-hover:block absolute -top-8 text-xs bg-claude-surface2 px-2 py-1 rounded whitespace-nowrap z-10">
                         {{ "%02d" | format(h) }}:00 - {{ count }} sessions
                     </div>
-                    <div class="w-full rounded-t transition-colors {{ 'bg-claude-accent' if count > 0 else 'bg-claude-border/30' }}" style="height: {{ bar_h if bar_h > 0 else 2 }}%; min-height: 2px;"></div>
+                    <div class="w-full rounded-t transition-colors {{ 'bg-claude-accent' if count > 0 else 'bg-claude-border/30' }}" style="height: {{ bar_px if bar_px > 0 else 2 }}px; min-height: 2px;"></div>
                 </div>
                 {% endfor %}
             </div>

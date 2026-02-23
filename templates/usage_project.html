@@ -174,16 +174,16 @@
         <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden">
             <!-- Visual bar chart -->
             <div class="p-5 border-b border-claude-border">
-                {% set max_daily = daily | map(attribute='total') | max or 1 %}
+                {% set max_daily_cost = daily | map(attribute='cost') | max or 1 %}
                 <div class="flex items-end gap-1" style="height: 140px;">
                     {% for d in daily %}
-                    {% set bar_height = (d.total / max_daily * 100) if max_daily > 0 else 0 %}
+                    {% set bar_px = (d.cost / max_daily_cost * 120)|round|int if max_daily_cost > 0 else 2 %}
                     <div class="flex-1 flex flex-col items-center gap-1 group relative" style="min-width: 0;">
                         <div class="hidden group-hover:block absolute -top-10 text-xs bg-claude-surface2 px-2 py-1 rounded whitespace-nowrap z-10 border border-claude-border">
                             {{ d.date }}<br>{{ d.total | compact_tokens }} ({{ d.session_count }} sessions)
                         </div>
                         <!-- Stacked bar -->
-                        <div class="w-full rounded-t overflow-hidden flex flex-col-reverse" style="height: {{ bar_height }}%; min-height: 2px;">
+                        <div class="w-full rounded-t overflow-hidden flex flex-col-reverse" style="height: {{ bar_px }}px; min-height: 2px;">
                             {% if d.total > 0 %}
                             {% if d.input > 0 %}<div class="bg-blue-500 w-full" style="height: {{ (d.input / d.total * 100) }}%"></div>{% endif %}
                             {% if d.output > 0 %}<div class="bg-green-500 w-full" style="height: {{ (d.output / d.total * 100) }}%"></div>{% endif %}
