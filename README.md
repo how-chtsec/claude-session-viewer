@@ -47,7 +47,7 @@ A web-based dashboard for browsing and analyzing [Claude Code](https://docs.anth
 ### Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-session-viewer.git
+git clone https://github.com/how-chtsec/claude-session-viewer.git
 cd claude-session-viewer
 pip install -r requirements.txt
 ```

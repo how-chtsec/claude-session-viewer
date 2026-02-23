@@ -634,8 +634,9 @@ def _dir_name_to_project_name(dir_name: str) -> str:
     """
     parts = dir_name.strip('-').split('-')
     # Find the last meaningful part(s) after common prefixes
-    # Skip home, username, and common dir names
-    skip = {'home', 'user', 'develop', 'projects', 'Downloads'}
+    # Skip home directory components and common dir names
+    home_parts = set(Path.home().parts[1:])  # e.g. {'home', 'username'}
+    skip = home_parts | {'develop', 'projects', 'Downloads'}
     meaningful = [p for p in parts if p and p not in skip]
     if meaningful:
         return '-'.join(meaningful)
