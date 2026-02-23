@@ -23,6 +23,18 @@ from .parser import (
 from .pricing import calculate_cost, calculate_session_cost
 
 
+def _safe_resolve(base: Path, *parts: str) -> Optional[Path]:
+    """Resolve base/parts to an absolute path; return None if it escapes base."""
+    try:
+        resolved = base.joinpath(*parts).resolve()
+        base_resolved = base.resolve()
+        if resolved != base_resolved and not str(resolved).startswith(str(base_resolved) + os.sep):
+            return None
+        return resolved
+    except (ValueError, TypeError):
+        return None
+
+
 def list_projects() -> list[dict]:
     """
     List all projects with their metadata.
@@ -80,8 +92,8 @@ def list_sessions(project_dir_name: str) -> list[dict]:
     List all sessions for a project with summaries.
     Returns list of session summary dicts sorted by start_time descending.
     """
-    project_path = PROJECTS_DIR / project_dir_name
-    if not project_path.is_dir():
+    project_path = _safe_resolve(PROJECTS_DIR, project_dir_name)
+    if not project_path or not project_path.is_dir():
         return []
 
     session_ids = get_session_ids(str(project_path))
@@ -102,8 +114,8 @@ def get_session_detail(project_dir_name: str, session_id: str) -> Optional[dict]
     Get full session detail including all messages, tool calls, and subagents.
     Returns a dict representation of SessionData.
     """
-    project_path = PROJECTS_DIR / project_dir_name
-    if not project_path.is_dir():
+    project_path = _safe_resolve(PROJECTS_DIR, project_dir_name)
+    if not project_path or not project_path.is_dir():
         return None
 
     session = parse_session(str(project_path), session_id)
@@ -591,7 +603,8 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
     ]
 
     # Entry-level daily stats (matches ccusage per-entry date grouping)
-    daily_entry = _compute_daily_entry_stats([PROJECTS_DIR / project_dir_name])
+    _project_path = _safe_resolve(PROJECTS_DIR, project_dir_name)
+    daily_entry = _compute_daily_entry_stats([_project_path] if _project_path else [])
 
     # Add session-level activity counts per day
     day_activity: dict[str, dict] = {}
@@ -741,7 +754,13 @@ def get_subagent_detail(project_dir_name: str, session_id: str, agent_id: str) -
     """Get full detail for a specific subagent within a session."""
     from .parser import _parse_subagent
 
-    project_path = PROJECTS_DIR / project_dir_name
+    # Reject agent_id with path traversal characters
+    if not agent_id or '/' in agent_id or '\\' in agent_id or '..' in agent_id:
+        return None
+
+    project_path = _safe_resolve(PROJECTS_DIR, project_dir_name)
+    if not project_path:
+        return None
     subagents_dir = project_path / session_id / 'subagents'
     if not subagents_dir.is_dir():
         return None
@@ -1001,7 +1020,10 @@ def get_team_detail(team_name: str) -> Optional[dict]:
 
 def _read_team_config(team_name: str) -> Optional[dict]:
     """Read a team's config.json."""
-    config_path = TEAMS_DIR / team_name / 'config.json'
+    team_path = _safe_resolve(TEAMS_DIR, team_name)
+    if not team_path:
+        return None
+    config_path = team_path / 'config.json'
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -1011,7 +1033,9 @@ def _read_team_config(team_name: str) -> Optional[dict]:
 
 def _read_team_tasks(team_name: str) -> list[dict]:
     """Read all task files for a team, sorted by id."""
-    tasks_dir = TASKS_DIR / team_name
+    tasks_dir = _safe_resolve(TASKS_DIR, team_name)
+    if not tasks_dir:
+        return []
     tasks = []
     if not tasks_dir.is_dir():
         return tasks
@@ -1346,7 +1370,9 @@ ACTIVE_THRESHOLD_SECONDS = 120  # sessions modified within 2 minutes are "active
 def is_session_active(project_dir_name: str, session_id: str) -> bool:
     """Check if a session JSONL file was recently modified."""
     import time
-    jsonl_path = PROJECTS_DIR / project_dir_name / f'{session_id}.jsonl'
+    jsonl_path = _safe_resolve(PROJECTS_DIR, project_dir_name, f'{session_id}.jsonl')
+    if not jsonl_path:
+        return False
     try:
         mtime = os.path.getmtime(jsonl_path)
         return (time.time() - mtime) < ACTIVE_THRESHOLD_SECONDS
@@ -1390,13 +1416,18 @@ def get_active_sessions() -> list[dict]:
 
 def get_jsonl_path(project_dir_name: str, session_id: str) -> Optional[str]:
     """Get the full filesystem path to a session JSONL file."""
-    p = PROJECTS_DIR / project_dir_name / f'{session_id}.jsonl'
+    p = _safe_resolve(PROJECTS_DIR, project_dir_name, f'{session_id}.jsonl')
+    if not p:
+        return None
     return str(p) if p.is_file() else None
 
 
-def get_session_dir(project_dir_name: str, session_id: str) -> str:
+def get_session_dir(project_dir_name: str, session_id: str) -> Optional[str]:
     """Get the session directory path (for tool-results etc)."""
-    return str(PROJECTS_DIR / project_dir_name / session_id)
+    p = _safe_resolve(PROJECTS_DIR, project_dir_name, session_id)
+    if not p:
+        return None
+    return str(p)
 
 
 def parse_incremental_entries(jsonl_path: str, session_dir: str,

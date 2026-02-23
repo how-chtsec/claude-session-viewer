@@ -76,10 +76,16 @@ class SessionData:
     total_cache_creation_tokens: int = 0
 
 
+_MAX_JSONL_SIZE = 500 * 1024 * 1024  # 500 MB
+_MAX_TOOL_RESULT_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
 def parse_jsonl_file(filepath: str) -> list[dict]:
     """Parse a JSONL file into a list of raw JSON objects."""
     entries = []
     try:
+        if os.path.getsize(filepath) > _MAX_JSONL_SIZE:
+            return entries
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
@@ -167,8 +173,12 @@ def _extract_tool_results(content) -> list[tuple]:
 
 def _read_tool_result_file(session_dir: str, tool_use_id: str) -> Optional[str]:
     """Try to read large tool result from external file."""
+    if not tool_use_id or '/' in tool_use_id or '\\' in tool_use_id or '..' in tool_use_id:
+        return None
     result_file = os.path.join(session_dir, 'tool-results', f'{tool_use_id}.txt')
     try:
+        if os.path.getsize(result_file) > _MAX_TOOL_RESULT_SIZE:
+            return None
         with open(result_file, 'r', encoding='utf-8') as f:
             return f.read()
     except (OSError, IOError):

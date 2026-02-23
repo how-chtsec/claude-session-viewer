@@ -6,6 +6,7 @@ A web interface for browsing and analyzing Claude Code session logs.
 
 import json
 import os
+import threading
 import time
 
 from flask import Flask, render_template, jsonify, abort, Response, request
@@ -32,6 +33,9 @@ from services.data import (
 )
 
 app = Flask(__name__)
+
+# Limit concurrent SSE connections to prevent thread pool exhaustion
+_sse_semaphore = threading.Semaphore(10)
 
 
 # ---------------------------------------------------------------------------
@@ -202,54 +206,61 @@ def api_active():
 @app.route('/api/session/<path:project_dir_name>/<session_id>/stream')
 def stream_session(project_dir_name, session_id):
     """SSE endpoint - stream new entries as they appear in the JSONL file."""
+    if not _sse_semaphore.acquire(blocking=False):
+        return jsonify({'error': 'Too many SSE connections'}), 503
+
     jsonl_path = get_jsonl_path(project_dir_name, session_id)
     if not jsonl_path:
+        _sse_semaphore.release()
         return jsonify({'error': 'Not found'}), 404
 
     session_dir = get_session_dir(project_dir_name, session_id)
 
     def generate():
-        # Start from current end of file
-        last_line = 0
         try:
-            with open(jsonl_path, 'r') as f:
-                for _ in f:
-                    last_line += 1
-        except OSError:
-            pass
-
-        # Send initial line count so client knows where we start
-        yield f"data: {json.dumps({'type': 'init', 'line_count': last_line})}\n\n"
-
-        idle_count = 0
-        while True:
+            # Start from current end of file
+            last_line = 0
             try:
-                new_entries, new_line_count = parse_incremental_entries(
-                    jsonl_path, session_dir, last_line
-                )
+                with open(jsonl_path, 'r') as f:
+                    for _ in f:
+                        last_line += 1
+            except OSError:
+                pass
 
-                if new_entries:
-                    idle_count = 0
-                    for entry in new_entries:
-                        yield f"data: {json.dumps(entry, default=str)}\n\n"
-                    last_line = new_line_count
-                else:
-                    idle_count += 1
-                    # Send heartbeat every 10 seconds to keep connection alive
-                    if idle_count % 5 == 0:
-                        yield f"data: {json.dumps({'type': 'heartbeat', 'line_count': last_line})}\n\n"
+            # Send initial line count so client knows where we start
+            yield f"data: {json.dumps({'type': 'init', 'line_count': last_line})}\n\n"
 
-                    # Stop streaming after 5 minutes of no activity
-                    if idle_count > 150:
-                        yield f"data: {json.dumps({'type': 'timeout', 'message': 'No activity for 5 minutes'})}\n\n"
-                        break
+            idle_count = 0
+            while True:
+                try:
+                    new_entries, new_line_count = parse_incremental_entries(
+                        jsonl_path, session_dir, last_line
+                    )
 
-            except GeneratorExit:
-                break
-            except Exception:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Parse error'})}\n\n"
+                    if new_entries:
+                        idle_count = 0
+                        for entry in new_entries:
+                            yield f"data: {json.dumps(entry, default=str)}\n\n"
+                        last_line = new_line_count
+                    else:
+                        idle_count += 1
+                        # Send heartbeat every 10 seconds to keep connection alive
+                        if idle_count % 5 == 0:
+                            yield f"data: {json.dumps({'type': 'heartbeat', 'line_count': last_line})}\n\n"
 
-            time.sleep(2)
+                        # Stop streaming after 5 minutes of no activity
+                        if idle_count > 150:
+                            yield f"data: {json.dumps({'type': 'timeout', 'message': 'No activity for 5 minutes'})}\n\n"
+                            break
+
+                except GeneratorExit:
+                    break
+                except Exception:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'Parse error'})}\n\n"
+
+                time.sleep(2)
+        finally:
+            _sse_semaphore.release()
 
     return Response(
         generate(),
@@ -413,8 +424,19 @@ def short_time(timestamp):
 
 
 # ---------------------------------------------------------------------------
+# Security headers
+# ---------------------------------------------------------------------------
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = 'http://127.0.0.1:5000'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    app.run(debug=os.environ.get('FLASK_DEBUG', '0') == '1', host='127.0.0.1', port=5000)
