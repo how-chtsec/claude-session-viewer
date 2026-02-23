@@ -231,6 +231,92 @@ def _utc_to_local_date(ts: str) -> str:
             return 'unknown'
 
 
+def _compute_daily_entry_stats(project_paths: list[Path]) -> list[dict]:
+    """Scan JSONL entries for daily token/cost stats, matching ccusage exactly.
+
+    Groups by each entry's local-timezone date (not session start date).
+    Deduplicates by messageId:requestId. Includes subagent JSONL files.
+    """
+    daily: dict[str, dict] = {}
+
+    for project_path in project_paths:
+        if not project_path.is_dir():
+            continue
+        for fname in os.listdir(project_path):
+            if not fname.endswith('.jsonl'):
+                continue
+            session_id = fname.replace('.jsonl', '')
+
+            # Collect main + subagent JSONL files
+            files = [project_path / fname]
+            sa_dir = project_path / session_id / 'subagents'
+            if sa_dir.is_dir():
+                for sf in os.listdir(sa_dir):
+                    if sf.endswith('.jsonl'):
+                        files.append(sa_dir / sf)
+
+            for fpath in files:
+                seen = set()
+                try:
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+
+                            msg = entry.get('message', {})
+                            usage = msg.get('usage')
+                            if not usage or not isinstance(usage, dict):
+                                continue
+                            inp = usage.get('input_tokens')
+                            out = usage.get('output_tokens')
+                            if inp is None or out is None:
+                                continue
+
+                            # Dedup by messageId:requestId
+                            msg_id = msg.get('id')
+                            req_id = entry.get('requestId')
+                            if msg_id and req_id:
+                                h = f'{msg_id}:{req_id}'
+                                if h in seen:
+                                    continue
+                                seen.add(h)
+
+                            ts = entry.get('timestamp', '')
+                            date_str = _utc_to_local_date(ts)
+                            if date_str == 'unknown':
+                                continue
+
+                            model = msg.get('model', 'unknown')
+                            cr = usage.get('cache_read_input_tokens', 0)
+                            cw = usage.get('cache_creation_input_tokens', 0)
+                            cost = calculate_cost(model, inp, out, cw, cr)
+
+                            if date_str not in daily:
+                                daily[date_str] = {
+                                    'input': 0, 'output': 0, 'cache_read': 0,
+                                    'cache_write': 0, 'total': 0, 'cost': 0.0,
+                                }
+                            ds = daily[date_str]
+                            ds['input'] += inp
+                            ds['output'] += out
+                            ds['cache_read'] += cr
+                            ds['cache_write'] += cw
+                            ds['total'] += inp + out + cr + cw
+                            ds['cost'] += cost
+                except OSError:
+                    continue
+
+    return [
+        {'date': date, **vals}
+        for date, vals in sorted(daily.items())
+    ]
+
+
 def get_global_stats() -> dict:
     """Get global statistics, computing daily usage from JSONL data."""
     stats = parse_stats_cache()
@@ -258,8 +344,8 @@ def get_global_stats() -> dict:
 
     # Per-model aggregation
     model_usage = {}
-    # Daily aggregation (using local timezone dates)
-    daily_stats: dict[str, dict] = {}
+    # Session-level daily activity (session_count, message_count, tool_count)
+    daily_activity: dict[str, dict] = {}
 
     for s in all_sessions:
         s_input = s.get('total_input_tokens', 0)
@@ -294,30 +380,37 @@ def get_global_stats() -> dict:
         mu['calculatedCost'] += s_cost
         mu['sessionCount'] += 1
 
-        # Daily (local timezone)
+        # Session-level daily grouping (for session_count, message_count, tool_count)
         date_str = _utc_to_local_date(s.get('start_time'))
-        if date_str not in daily_stats:
-            daily_stats[date_str] = {
-                'input': 0, 'output': 0, 'cache_read': 0,
-                'cache_write': 0, 'total': 0, 'cost': 0.0,
+        if date_str not in daily_activity:
+            daily_activity[date_str] = {
                 'session_count': 0, 'message_count': 0, 'tool_count': 0,
             }
-        ds = daily_stats[date_str]
-        ds['input'] += s_input
-        ds['output'] += s_output
-        ds['cache_read'] += s_cache_read
-        ds['cache_write'] += s_cache_write
-        ds['total'] += s_input + s_output + s_cache_read + s_cache_write
-        ds['cost'] += s_cost
-        ds['session_count'] += 1
-        ds['message_count'] += s_messages
-        ds['tool_count'] += s_tools
+        da = daily_activity[date_str]
+        da['session_count'] += 1
+        da['message_count'] += s_messages
+        da['tool_count'] += s_tools
 
-    daily_list = [
-        {'date': date, **vals}
-        for date, vals in sorted(daily_stats.items())
-        if date != 'unknown'
-    ]
+    # Entry-level daily stats for tokens/cost (matches ccusage exactly)
+    all_project_paths = [
+        PROJECTS_DIR / d for d in os.listdir(PROJECTS_DIR)
+    ] if PROJECTS_DIR.is_dir() else []
+    daily_entry_stats = _compute_daily_entry_stats(all_project_paths)
+
+    # Merge session-level activity counts into entry-level daily stats
+    for day in daily_entry_stats:
+        da = daily_activity.get(day['date'], {})
+        day['session_count'] = da.get('session_count', 0)
+        day['message_count'] = da.get('message_count', 0)
+        day['tool_count'] = da.get('tool_count', 0)
+
+    # Use entry-level totals for tokens/cost (more accurate)
+    if daily_entry_stats:
+        total_input = sum(d['input'] for d in daily_entry_stats)
+        total_output = sum(d['output'] for d in daily_entry_stats)
+        total_cache_read = sum(d['cache_read'] for d in daily_entry_stats)
+        total_cache_create = sum(d['cache_write'] for d in daily_entry_stats)
+        total_cost = sum(d['cost'] for d in daily_entry_stats)
 
     # Preserve some stats-cache fields for sections that still use them
     sc = stats or {}
@@ -327,7 +420,7 @@ def get_global_stats() -> dict:
         'total_messages': total_messages,
         'first_session_date': sc.get('firstSessionDate'),
         'model_usage': model_usage,
-        'daily_usage': daily_list,
+        'daily_usage': daily_entry_stats,
         'daily_activity': sc.get('dailyActivity', []),
         'daily_model_tokens': sc.get('dailyModelTokens', []),
         'longest_session': sc.get('longestSession'),
@@ -497,36 +590,26 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         for name, stats in sorted(model_stats.items(), key=lambda x: x[1]['total'], reverse=True)
     ]
 
-    # Daily token aggregation (local timezone dates to match ccusage)
-    daily_stats = {}
+    # Entry-level daily stats (matches ccusage per-entry date grouping)
+    daily_entry = _compute_daily_entry_stats([PROJECTS_DIR / project_dir_name])
+
+    # Add session-level activity counts per day
+    day_activity: dict[str, dict] = {}
     for s in sessions:
         date_str = _utc_to_local_date(s.get('start_time'))
         if date_str == 'unknown':
             continue
-        if date_str not in daily_stats:
-            daily_stats[date_str] = {
-                'input': 0, 'output': 0, 'cache_read': 0,
-                'cache_write': 0, 'total': 0, 'cost': 0.0,
-                'session_count': 0, 'message_count': 0,
-            }
-        ds = daily_stats[date_str]
-        s_input = s.get('total_input_tokens', 0)
-        s_output = s.get('total_output_tokens', 0)
-        s_cache_read = s.get('total_cache_read_tokens', 0)
-        s_cache_write = s.get('total_cache_creation_tokens', 0)
-        ds['input'] += s_input
-        ds['output'] += s_output
-        ds['cache_read'] += s_cache_read
-        ds['cache_write'] += s_cache_write
-        ds['total'] += s_input + s_output + s_cache_read + s_cache_write
-        ds['session_count'] += 1
-        ds['message_count'] += s.get('message_count', 0)
-        ds['cost'] += calculate_session_cost(s.get('model_breakdowns', {}))
+        if date_str not in day_activity:
+            day_activity[date_str] = {'session_count': 0, 'message_count': 0}
+        day_activity[date_str]['session_count'] += 1
+        day_activity[date_str]['message_count'] += s.get('message_count', 0)
 
-    daily_list = [
-        {'date': date, **stats}
-        for date, stats in sorted(daily_stats.items())
-    ]
+    for day in daily_entry:
+        da = day_activity.get(day['date'], {})
+        day['session_count'] = da.get('session_count', 0)
+        day['message_count'] = da.get('message_count', 0)
+
+    daily_list = daily_entry
 
     return {
         'project': project,

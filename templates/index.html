@@ -134,10 +134,10 @@
                         <span class="text-claude-text font-mono font-medium" title="{{ model_total | format_tokens }}">{{ model_total | compact_tokens }}</span>
                     </div>
                     {% endif %}
-                    {% if usage.costUSD is defined and usage.costUSD > 0 %}
+                    {% if usage.calculatedCost is defined and usage.calculatedCost > 0 %}
                     <div class="flex items-center justify-between text-xs">
                         <span class="text-claude-muted">Cost</span>
-                        <span class="text-green-400 font-medium">${{ "%.2f" | format(usage.costUSD) }}</span>
+                        <span class="text-green-400 font-medium">{{ usage.calculatedCost | format_cost }}</span>
                     </div>
                     {% endif %}
                 </div>
@@ -148,41 +148,36 @@
         {% endif %}
 
         <!-- Daily token usage -->
-        {% if stats.daily_model_tokens %}
+        {% if stats.daily_usage %}
         <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden">
             <div class="px-5 py-3 border-b border-claude-border">
-                <h3 class="text-sm font-semibold text-claude-text">Daily Output Tokens</h3>
+                <h3 class="text-sm font-semibold text-claude-text">Daily Token Usage</h3>
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="border-b border-claude-border text-claude-muted text-xs uppercase tracking-wider">
                             <th class="text-left px-4 py-2 font-medium">Date</th>
-                            {% set all_models = [] %}
-                            {% for day in stats.daily_model_tokens %}
-                                {% for m in day.tokensByModel.keys() %}
-                                    {% if m not in all_models %}
-                                        {% if all_models.append(m) %}{% endif %}
-                                    {% endif %}
-                                {% endfor %}
-                            {% endfor %}
-                            {% for m in all_models %}
-                            <th class="text-right px-4 py-2 font-medium">{{ m | replace('claude-', '') | truncate(20, True, '') }}</th>
-                            {% endfor %}
+                            <th class="text-right px-4 py-2 font-medium">Sessions</th>
+                            <th class="text-right px-4 py-2 font-medium">Input</th>
+                            <th class="text-right px-4 py-2 font-medium">Output</th>
+                            <th class="text-right px-4 py-2 font-medium">Cache Read</th>
+                            <th class="text-right px-4 py-2 font-medium">Cache Write</th>
                             <th class="text-right px-4 py-2 font-medium">Total</th>
+                            <th class="text-right px-4 py-2 font-medium">Cost</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for day in stats.daily_model_tokens | reverse %}
+                        {% for day in stats.daily_usage | reverse %}
                         <tr class="border-b border-claude-border/30 hover:bg-claude-surface2/30 transition-colors">
-                            <td class="px-4 py-2 text-claude-text">{{ day.date }}</td>
-                            {% set day_total = {'v': 0} %}
-                            {% for m in all_models %}
-                            {% set tokens = day.tokensByModel.get(m, 0) %}
-                            {% if day_total.update({'v': day_total.v + tokens}) %}{% endif %}
-                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-muted">{{ tokens | format_tokens }}</td>
-                            {% endfor %}
-                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-text font-medium">{{ day_total.v | format_tokens }}</td>
+                            <td class="px-4 py-2 text-claude-text font-medium">{{ day.date }}</td>
+                            <td class="px-4 py-2 text-right text-claude-muted">{{ day.session_count }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-blue-400" title="{{ day.input | format_tokens }}">{{ day.input | compact_tokens }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-green-400" title="{{ day.output | format_tokens }}">{{ day.output | compact_tokens }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-yellow-400" title="{{ day.cache_read | format_tokens }}">{{ day.cache_read | compact_tokens }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-purple-400" title="{{ day.cache_write | format_tokens }}">{{ day.cache_write | compact_tokens }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-text font-medium" title="{{ day.total | format_tokens }}">{{ day.total | compact_tokens }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-green-400 font-medium">{{ day.cost | format_cost }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -192,7 +187,7 @@
         {% endif %}
 
         <!-- Daily activity -->
-        {% if stats.daily_activity %}
+        {% if stats.daily_usage %}
         <div class="bg-claude-surface rounded-xl border border-claude-border overflow-hidden mt-4">
             <div class="px-5 py-3 border-b border-claude-border">
                 <h3 class="text-sm font-semibold text-claude-text">Daily Activity</h3>
@@ -205,21 +200,21 @@
                             <th class="text-right px-4 py-2 font-medium">Sessions</th>
                             <th class="text-right px-4 py-2 font-medium">Messages</th>
                             <th class="text-right px-4 py-2 font-medium">Tool Calls</th>
-                            <th class="text-left px-4 py-2 font-medium w-1/3">Messages</th>
+                            <th class="text-left px-4 py-2 font-medium w-1/3">Activity</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% set max_msgs = stats.daily_activity | map(attribute='messageCount') | max %}
-                        {% for day in stats.daily_activity | reverse %}
+                        {% set max_msgs = stats.daily_usage | map(attribute='message_count') | max %}
+                        {% for day in stats.daily_usage | reverse %}
                         <tr class="border-b border-claude-border/30 hover:bg-claude-surface2/30 transition-colors">
-                            <td class="px-4 py-2 text-claude-text">{{ day.date }}</td>
-                            <td class="px-4 py-2 text-right text-claude-muted">{{ day.sessionCount }}</td>
-                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-muted">{{ day.messageCount | format_tokens }}</td>
-                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-muted">{{ day.toolCallCount | format_tokens }}</td>
+                            <td class="px-4 py-2 text-claude-text font-medium">{{ day.date }}</td>
+                            <td class="px-4 py-2 text-right text-claude-muted">{{ day.session_count }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-muted">{{ day.message_count | format_tokens }}</td>
+                            <td class="px-4 py-2 text-right font-mono text-xs text-claude-muted">{{ day.tool_count | format_tokens }}</td>
                             <td class="px-4 py-2">
                                 {% if max_msgs and max_msgs > 0 %}
                                 <div class="h-3 rounded-full bg-claude-accent/30 overflow-hidden">
-                                    <div class="h-full rounded-full bg-claude-accent" style="width: {{ (day.messageCount / max_msgs * 100) }}%"></div>
+                                    <div class="h-full rounded-full bg-claude-accent" style="width: {{ (day.message_count / max_msgs * 100) }}%"></div>
                                 </div>
                                 {% endif %}
                             </td>

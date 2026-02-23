@@ -394,10 +394,8 @@ def format_cost(value):
     """Format USD cost value. Shows $X.XX for >= $0.01, <$0.01 otherwise."""
     if not value or value <= 0:
         return '-'
-    if value >= 100:
-        return f'${value:,.0f}'
     if value >= 0.01:
-        return f'${value:.2f}'
+        return f'${value:,.2f}'
     return '<$0.01'
 
 
