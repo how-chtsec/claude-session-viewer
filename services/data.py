@@ -7,7 +7,7 @@ and aggregate statistics.
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -213,43 +213,30 @@ def get_session_detail(project_dir_name: str, session_id: str) -> Optional[dict]
     }
 
 
+def _utc_to_local_date(ts: str) -> str:
+    """Convert a UTC ISO timestamp to a local-timezone date string (YYYY-MM-DD).
+
+    ccusage groups entries by local date, so we must do the same for consistency.
+    """
+    if not ts:
+        return 'unknown'
+    try:
+        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        return dt.astimezone().strftime('%Y-%m-%d')
+    except (ValueError, TypeError):
+        # Fallback: extract raw date portion
+        try:
+            return ts[:10]
+        except (TypeError, IndexError):
+            return 'unknown'
+
+
 def get_global_stats() -> dict:
-    """Get global statistics from stats-cache.json."""
+    """Get global statistics, computing daily usage from JSONL data."""
     stats = parse_stats_cache()
-    if not stats:
-        return {
-            'total_sessions': 0,
-            'total_messages': 0,
-            'model_usage': {},
-            'daily_activity': [],
-            'daily_model_tokens': [],
-        }
 
-    # Compute aggregate token totals across all models from stats-cache
-    model_usage = stats.get('modelUsage', {})
-    total_input = 0
-    total_output = 0
-    total_cache_read = 0
-    total_cache_create = 0
-    for model_name, usage in model_usage.items():
-        if isinstance(usage, dict):
-            total_input += usage.get('inputTokens', 0)
-            total_output += usage.get('outputTokens', 0)
-            total_cache_read += usage.get('cacheReadInputTokens', 0)
-            total_cache_create += usage.get('cacheCreationInputTokens', 0)
-            # Calculate cost per model using base rates
-            model_cost = calculate_cost(
-                model_name,
-                input_tokens=usage.get('inputTokens', 0),
-                output_tokens=usage.get('outputTokens', 0),
-                cache_creation_tokens=usage.get('cacheCreationInputTokens', 0),
-                cache_read_tokens=usage.get('cacheReadInputTokens', 0),
-            )
-            usage['calculatedCost'] = model_cost
-
-    # Calculate accurate total cost from JSONL data (per-model per-session)
-    # stats-cache.json may misattribute tokens across models
-    total_cost = 0.0
+    # Collect ALL sessions across projects for accurate computation
+    all_sessions = []
     if PROJECTS_DIR.is_dir():
         for dir_name in os.listdir(PROJECTS_DIR):
             project_path = PROJECTS_DIR / dir_name
@@ -258,17 +245,93 @@ def get_global_stats() -> dict:
             session_ids = get_session_ids(str(project_path))
             for sid in session_ids:
                 s = get_session_summary(str(project_path), sid)
-                total_cost += calculate_session_cost(s.get('model_breakdowns', {}))
+                all_sessions.append(s)
+
+    # Aggregate totals from sessions
+    total_input = 0
+    total_output = 0
+    total_cache_read = 0
+    total_cache_create = 0
+    total_cost = 0.0
+    total_messages = 0
+    total_tools = 0
+
+    # Per-model aggregation
+    model_usage = {}
+    # Daily aggregation (using local timezone dates)
+    daily_stats: dict[str, dict] = {}
+
+    for s in all_sessions:
+        s_input = s.get('total_input_tokens', 0)
+        s_output = s.get('total_output_tokens', 0)
+        s_cache_read = s.get('total_cache_read_tokens', 0)
+        s_cache_write = s.get('total_cache_creation_tokens', 0)
+        s_cost = calculate_session_cost(s.get('model_breakdowns', {}))
+        s_messages = s.get('message_count', 0)
+        s_tools = s.get('tool_call_count', 0)
+
+        total_input += s_input
+        total_output += s_output
+        total_cache_read += s_cache_read
+        total_cache_create += s_cache_write
+        total_cost += s_cost
+        total_messages += s_messages
+        total_tools += s_tools
+
+        # Per-model
+        model = s.get('model') or 'unknown'
+        if model not in model_usage:
+            model_usage[model] = {
+                'inputTokens': 0, 'outputTokens': 0,
+                'cacheReadInputTokens': 0, 'cacheCreationInputTokens': 0,
+                'calculatedCost': 0.0, 'sessionCount': 0,
+            }
+        mu = model_usage[model]
+        mu['inputTokens'] += s_input
+        mu['outputTokens'] += s_output
+        mu['cacheReadInputTokens'] += s_cache_read
+        mu['cacheCreationInputTokens'] += s_cache_write
+        mu['calculatedCost'] += s_cost
+        mu['sessionCount'] += 1
+
+        # Daily (local timezone)
+        date_str = _utc_to_local_date(s.get('start_time'))
+        if date_str not in daily_stats:
+            daily_stats[date_str] = {
+                'input': 0, 'output': 0, 'cache_read': 0,
+                'cache_write': 0, 'total': 0, 'cost': 0.0,
+                'session_count': 0, 'message_count': 0, 'tool_count': 0,
+            }
+        ds = daily_stats[date_str]
+        ds['input'] += s_input
+        ds['output'] += s_output
+        ds['cache_read'] += s_cache_read
+        ds['cache_write'] += s_cache_write
+        ds['total'] += s_input + s_output + s_cache_read + s_cache_write
+        ds['cost'] += s_cost
+        ds['session_count'] += 1
+        ds['message_count'] += s_messages
+        ds['tool_count'] += s_tools
+
+    daily_list = [
+        {'date': date, **vals}
+        for date, vals in sorted(daily_stats.items())
+        if date != 'unknown'
+    ]
+
+    # Preserve some stats-cache fields for sections that still use them
+    sc = stats or {}
 
     return {
-        'total_sessions': stats.get('totalSessions', 0),
-        'total_messages': stats.get('totalMessages', 0),
-        'first_session_date': stats.get('firstSessionDate'),
+        'total_sessions': len(all_sessions),
+        'total_messages': total_messages,
+        'first_session_date': sc.get('firstSessionDate'),
         'model_usage': model_usage,
-        'daily_activity': stats.get('dailyActivity', []),
-        'daily_model_tokens': stats.get('dailyModelTokens', []),
-        'longest_session': stats.get('longestSession'),
-        'hour_counts': stats.get('hourCounts', {}),
+        'daily_usage': daily_list,
+        'daily_activity': sc.get('dailyActivity', []),
+        'daily_model_tokens': sc.get('dailyModelTokens', []),
+        'longest_session': sc.get('longestSession'),
+        'hour_counts': sc.get('hourCounts', {}),
         'total_input_tokens': total_input,
         'total_output_tokens': total_output,
         'total_cache_read_tokens': total_cache_read,
@@ -434,16 +497,11 @@ def get_project_usage_detail(project_dir_name: str) -> Optional[dict]:
         for name, stats in sorted(model_stats.items(), key=lambda x: x[1]['total'], reverse=True)
     ]
 
-    # Daily token aggregation
+    # Daily token aggregation (local timezone dates to match ccusage)
     daily_stats = {}
-    daily_models: dict[str, dict[str, str]] = {}  # date -> {model -> model_name} for cost calc
     for s in sessions:
-        start = s.get('start_time')
-        if not start:
-            continue
-        try:
-            date_str = start[:10]  # YYYY-MM-DD
-        except (TypeError, IndexError):
+        date_str = _utc_to_local_date(s.get('start_time'))
+        if date_str == 'unknown':
             continue
         if date_str not in daily_stats:
             daily_stats[date_str] = {
