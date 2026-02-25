@@ -79,6 +79,10 @@ class SessionData:
 _MAX_JSONL_SIZE = 500 * 1024 * 1024  # 500 MB
 _MAX_TOOL_RESULT_SIZE = 50 * 1024 * 1024  # 50 MB
 
+# mtime-based in-memory cache for get_session_summary()
+# Key: (project_dir, session_id) -> { 'mtime': float, 'sa_mtime': float, 'data': dict }
+_summary_cache: dict[tuple[str, str], dict] = {}
+
 
 def parse_jsonl_file(filepath: str) -> list[dict]:
     """Parse a JSONL file into a list of raw JSON objects."""
@@ -501,9 +505,40 @@ def get_session_ids(project_dir: str) -> list[str]:
     return sessions
 
 
+def _get_max_mtime_in_dir(dirpath: str, ext: str = '.jsonl') -> float:
+    """Return the max mtime of files with given extension in a directory, or 0."""
+    max_mt = 0.0
+    try:
+        for fname in os.listdir(dirpath):
+            if fname.endswith(ext):
+                try:
+                    mt = os.path.getmtime(os.path.join(dirpath, fname))
+                    if mt > max_mt:
+                        max_mt = mt
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return max_mt
+
+
 def get_session_summary(project_dir: str, session_id: str) -> dict:
     """Get a lightweight summary of a session without parsing all messages."""
     jsonl_path = os.path.join(project_dir, f'{session_id}.jsonl')
+
+    # mtime-based cache check
+    cache_key = (project_dir, session_id)
+    try:
+        jsonl_mtime = os.path.getmtime(jsonl_path)
+    except OSError:
+        jsonl_mtime = 0.0
+    subagents_dir_path = os.path.join(project_dir, session_id, 'subagents')
+    sa_mtime = _get_max_mtime_in_dir(subagents_dir_path)
+
+    cached = _summary_cache.get(cache_key)
+    if cached and cached['mtime'] == jsonl_mtime and cached['sa_mtime'] == sa_mtime:
+        return cached['data'].copy()
+
     summary = {
         'session_id': session_id,
         'slug': '',
@@ -626,7 +661,14 @@ def get_session_summary(project_dir: str, session_id: str) -> dict:
         summary['model_breakdowns'],
     )
 
-    return summary
+    # Store in cache
+    _summary_cache[cache_key] = {
+        'mtime': jsonl_mtime,
+        'sa_mtime': sa_mtime,
+        'data': summary,
+    }
+
+    return summary.copy()
 
 
 def _aggregate_subagent_tokens(subagents_dir: str, model_breakdowns: dict):

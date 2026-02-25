@@ -20,7 +20,14 @@ from .parser import (
     parse_session,
     parse_stats_cache,
 )
+from .parser import _get_max_mtime_in_dir
 from .pricing import calculate_cost, calculate_session_cost
+
+# mtime-based in-memory caches
+# _cwd_cache: jsonl_path -> { 'mtime': float, 'cwd': str }
+_cwd_cache: dict[str, dict] = {}
+# _daily_cache: str(project_path) -> { 'mtime': float, 'data': dict[date_str, stats_dict] }
+_daily_cache: dict[str, dict] = {}
 
 
 def _safe_resolve(base: Path, *parts: str) -> Optional[Path]:
@@ -244,89 +251,130 @@ def _utc_to_local_date(ts: str) -> str:
             return 'unknown'
 
 
+def _compute_single_project_daily(project_path: Path) -> dict[str, dict]:
+    """Compute daily token/cost stats for a single project.
+
+    Returns dict[date_str, stats_dict] where stats_dict has keys:
+    input, output, cache_read, cache_write, total, cost.
+    """
+    daily: dict[str, dict] = {}
+
+    if not project_path.is_dir():
+        return daily
+
+    for fname in os.listdir(project_path):
+        if not fname.endswith('.jsonl'):
+            continue
+        session_id = fname.replace('.jsonl', '')
+
+        # Collect main + subagent JSONL files
+        files = [project_path / fname]
+        sa_dir = project_path / session_id / 'subagents'
+        if sa_dir.is_dir():
+            for sf in os.listdir(sa_dir):
+                if sf.endswith('.jsonl'):
+                    files.append(sa_dir / sf)
+
+        for fpath in files:
+            seen = set()
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        msg = entry.get('message', {})
+                        usage = msg.get('usage')
+                        if not usage or not isinstance(usage, dict):
+                            continue
+                        inp = usage.get('input_tokens')
+                        out = usage.get('output_tokens')
+                        if inp is None or out is None:
+                            continue
+
+                        # Dedup by messageId:requestId
+                        msg_id = msg.get('id')
+                        req_id = entry.get('requestId')
+                        if msg_id and req_id:
+                            h = f'{msg_id}:{req_id}'
+                            if h in seen:
+                                continue
+                            seen.add(h)
+
+                        ts = entry.get('timestamp', '')
+                        date_str = _utc_to_local_date(ts)
+                        if date_str == 'unknown':
+                            continue
+
+                        model = msg.get('model', 'unknown')
+                        cr = usage.get('cache_read_input_tokens', 0)
+                        cw = usage.get('cache_creation_input_tokens', 0)
+                        cost = calculate_cost(model, inp, out, cw, cr)
+
+                        if date_str not in daily:
+                            daily[date_str] = {
+                                'input': 0, 'output': 0, 'cache_read': 0,
+                                'cache_write': 0, 'total': 0, 'cost': 0.0,
+                            }
+                        ds = daily[date_str]
+                        ds['input'] += inp
+                        ds['output'] += out
+                        ds['cache_read'] += cr
+                        ds['cache_write'] += cw
+                        ds['total'] += inp + out + cr + cw
+                        ds['cost'] += cost
+            except OSError:
+                continue
+
+    return daily
+
+
 def _compute_daily_entry_stats(project_paths: list[Path]) -> list[dict]:
     """Scan JSONL entries for daily token/cost stats, matching ccusage exactly.
 
     Groups by each entry's local-timezone date (not session start date).
     Deduplicates by messageId:requestId. Includes subagent JSONL files.
+    Uses per-project mtime-based caching.
     """
-    daily: dict[str, dict] = {}
+    merged: dict[str, dict] = {}
 
     for project_path in project_paths:
-        if not project_path.is_dir():
+        if not project_path or not project_path.is_dir():
             continue
-        for fname in os.listdir(project_path):
-            if not fname.endswith('.jsonl'):
-                continue
-            session_id = fname.replace('.jsonl', '')
 
-            # Collect main + subagent JSONL files
-            files = [project_path / fname]
-            sa_dir = project_path / session_id / 'subagents'
-            if sa_dir.is_dir():
-                for sf in os.listdir(sa_dir):
-                    if sf.endswith('.jsonl'):
-                        files.append(sa_dir / sf)
+        cache_key = str(project_path)
+        max_mtime = _get_project_max_mtime(project_path)
 
-            for fpath in files:
-                seen = set()
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
+        cached = _daily_cache.get(cache_key)
+        if cached and cached['mtime'] == max_mtime:
+            project_daily = cached['data']
+        else:
+            project_daily = _compute_single_project_daily(project_path)
+            _daily_cache[cache_key] = {'mtime': max_mtime, 'data': project_daily}
 
-                            msg = entry.get('message', {})
-                            usage = msg.get('usage')
-                            if not usage or not isinstance(usage, dict):
-                                continue
-                            inp = usage.get('input_tokens')
-                            out = usage.get('output_tokens')
-                            if inp is None or out is None:
-                                continue
-
-                            # Dedup by messageId:requestId
-                            msg_id = msg.get('id')
-                            req_id = entry.get('requestId')
-                            if msg_id and req_id:
-                                h = f'{msg_id}:{req_id}'
-                                if h in seen:
-                                    continue
-                                seen.add(h)
-
-                            ts = entry.get('timestamp', '')
-                            date_str = _utc_to_local_date(ts)
-                            if date_str == 'unknown':
-                                continue
-
-                            model = msg.get('model', 'unknown')
-                            cr = usage.get('cache_read_input_tokens', 0)
-                            cw = usage.get('cache_creation_input_tokens', 0)
-                            cost = calculate_cost(model, inp, out, cw, cr)
-
-                            if date_str not in daily:
-                                daily[date_str] = {
-                                    'input': 0, 'output': 0, 'cache_read': 0,
-                                    'cache_write': 0, 'total': 0, 'cost': 0.0,
-                                }
-                            ds = daily[date_str]
-                            ds['input'] += inp
-                            ds['output'] += out
-                            ds['cache_read'] += cr
-                            ds['cache_write'] += cw
-                            ds['total'] += inp + out + cr + cw
-                            ds['cost'] += cost
-                except OSError:
-                    continue
+        # Merge into overall daily stats
+        for date_str, stats in project_daily.items():
+            if date_str not in merged:
+                merged[date_str] = {
+                    'input': 0, 'output': 0, 'cache_read': 0,
+                    'cache_write': 0, 'total': 0, 'cost': 0.0,
+                }
+            ms = merged[date_str]
+            ms['input'] += stats['input']
+            ms['output'] += stats['output']
+            ms['cache_read'] += stats['cache_read']
+            ms['cache_write'] += stats['cache_write']
+            ms['total'] += stats['total']
+            ms['cost'] += stats['cost']
 
     return [
         {'date': date, **vals}
-        for date, vals in sorted(daily.items())
+        for date, vals in sorted(merged.items())
     ]
 
 
@@ -657,8 +705,36 @@ def _dir_name_to_project_name(dir_name: str) -> str:
     return dir_name
 
 
+def _get_project_max_mtime(project_path: Path) -> float:
+    """Get the max mtime across all JSONL + subagent JSONL files in a project."""
+    max_mt = _get_max_mtime_in_dir(str(project_path))
+    # Also check subagent directories
+    try:
+        for fname in os.listdir(project_path):
+            if not fname.endswith('.jsonl'):
+                continue
+            session_id = fname.replace('.jsonl', '')
+            sa_dir = project_path / session_id / 'subagents'
+            sa_mt = _get_max_mtime_in_dir(str(sa_dir))
+            if sa_mt > max_mt:
+                max_mt = sa_mt
+    except OSError:
+        pass
+    return max_mt
+
+
 def _get_cwd_from_session(jsonl_path: str) -> str:
     """Extract the cwd from the first entry in a session JSONL file."""
+    # mtime-based cache check
+    try:
+        mtime = os.path.getmtime(jsonl_path)
+    except OSError:
+        return ''
+    cached = _cwd_cache.get(jsonl_path)
+    if cached and cached['mtime'] == mtime:
+        return cached['cwd']
+
+    cwd = ''
     try:
         with open(jsonl_path, 'r', encoding='utf-8') as f:
             for line in f:
@@ -667,14 +743,16 @@ def _get_cwd_from_session(jsonl_path: str) -> str:
                     continue
                 try:
                     entry = json.loads(line)
-                    cwd = entry.get('cwd')
+                    cwd = entry.get('cwd', '')
                     if cwd:
-                        return cwd
+                        break
                 except json.JSONDecodeError:
                     continue
     except (OSError, IOError):
         pass
-    return ''
+
+    _cwd_cache[jsonl_path] = {'mtime': mtime, 'cwd': cwd}
+    return cwd
 
 
 def _summarize_tool_input(tool_name: str, params: dict) -> str:
