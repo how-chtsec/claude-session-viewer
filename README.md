@@ -77,7 +77,6 @@ claude-session-viewer/
     ├── session.html         # Session detail timeline
     ├── subagent_detail.html # Subagent detail page
     ├── usage.html           # Global usage stats
-    ├── usage_project.html   # Per-project usage
     ├── usage_projects.html  # Cross-project comparison
     ├── live.html            # Active sessions list
     ├── live_session.html    # Real-time session view

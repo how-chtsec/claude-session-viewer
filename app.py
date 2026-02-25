@@ -9,7 +9,7 @@ import os
 import threading
 import time
 
-from flask import Flask, render_template, jsonify, abort, Response, request
+from flask import Flask, render_template, jsonify, abort, Response, request, redirect, url_for
 
 from services.data import (
     list_projects,
@@ -67,24 +67,35 @@ def usage_projects():
 
 @app.route('/usage/project/<path:project_dir_name>')
 def usage_project(project_dir_name):
-    """Detailed token usage breakdown for a single project."""
-    detail = get_project_usage_detail(project_dir_name)
-    if not detail:
-        abort(404)
-    return render_template('usage_project.html', **detail)
+    """Redirect to project detail with usage tab."""
+    return redirect(url_for('project_detail', project_dir_name=project_dir_name, tab='usage'), code=301)
 
 
 @app.route('/project/<path:project_dir_name>')
 def project_detail(project_dir_name):
-    """List sessions for a project."""
-    sessions = list_sessions(project_dir_name)
-    enrich_sessions_with_agent_info(sessions)
+    """List sessions or show token usage for a project."""
     projects = list_projects()
     project = next((p for p in projects if p['dir_name'] == project_dir_name), None)
     if not project:
         abort(404)
+
+    tab = request.args.get('tab', 'sessions')
+    if tab not in ('sessions', 'usage'):
+        tab = 'sessions'
+
+    if tab == 'usage':
+        detail = get_project_usage_detail(project_dir_name)
+        if not detail:
+            abort(404)
+        detail['usage_sessions'] = detail.pop('sessions', [])
+        detail.pop('project', None)
+        detail['active_tab'] = 'usage'
+        return render_template('project.html', project=project, **detail)
+
+    sessions = list_sessions(project_dir_name)
+    enrich_sessions_with_agent_info(sessions)
     date_groups = group_sessions_by_date(sessions)
-    return render_template('project.html', project=project, sessions=sessions, date_groups=date_groups)
+    return render_template('project.html', project=project, sessions=sessions, date_groups=date_groups, active_tab='sessions')
 
 
 @app.route('/api/session/<path:project_dir_name>/<session_id>')
