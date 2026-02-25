@@ -102,6 +102,7 @@ def list_sessions(project_dir_name: str) -> list[dict]:
     for sid in session_ids:
         summary = get_session_summary(str(project_path), sid)
         summary['project_dir_name'] = project_dir_name
+        summary['cost'] = calculate_session_cost(summary.get('model_breakdowns', {}))
         sessions.append(summary)
 
     # Sort by start_time descending
@@ -892,6 +893,7 @@ def group_sessions_by_date(sessions: list[dict]) -> list[dict]:
             for s in date_sessions
         )
         total_messages = sum(s.get('message_count', 0) for s in date_sessions)
+        total_cost = sum(s.get('cost', 0) for s in date_sessions)
 
         result.append({
             'date': date_str,
@@ -901,6 +903,7 @@ def group_sessions_by_date(sessions: list[dict]) -> list[dict]:
                 'session_count': len(date_sessions),
                 'total_tokens': total_tokens,
                 'total_messages': total_messages,
+                'total_cost': total_cost,
             },
         })
 

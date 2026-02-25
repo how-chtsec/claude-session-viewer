@@ -51,9 +51,10 @@
         {% set proj_cache_read = sessions | sum(attribute='total_cache_read_tokens') %}
         {% set proj_cache_write = sessions | sum(attribute='total_cache_creation_tokens') %}
         {% set proj_total = proj_input + proj_output + proj_cache_read + proj_cache_write %}
+        {% set proj_cost = sessions | sum(attribute='cost') %}
         {% if proj_total > 0 %}
         <div class="pt-4 border-t border-claude-border/50">
-            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div class="grid grid-cols-2 sm:grid-cols-6 gap-3">
                 <div>
                     <div class="text-claude-muted text-xs mb-0.5">Input</div>
                     <div class="text-sm font-semibold text-blue-400 font-mono" title="{{ proj_input | format_tokens }}">{{ proj_input | compact_tokens }}</div>
@@ -73,6 +74,10 @@
                 <div>
                     <div class="text-claude-muted text-xs mb-0.5">Total</div>
                     <div class="text-sm font-semibold text-claude-text font-mono" title="{{ proj_total | format_tokens }}">{{ proj_total | compact_tokens }}</div>
+                </div>
+                <div>
+                    <div class="text-claude-muted text-xs mb-0.5">Est. Cost</div>
+                    <div class="text-sm font-semibold text-green-400 font-mono">{{ proj_cost | format_cost }}</div>
                 </div>
             </div>
             <div class="flex rounded-full h-2 overflow-hidden bg-claude-bg mt-3">
@@ -108,6 +113,9 @@
                     <span>{{ group.summary.total_messages }} msgs</span>
                     {% if group.summary.total_tokens %}
                     <span class="font-mono">{{ group.summary.total_tokens | compact_tokens }} tok</span>
+                    {% endif %}
+                    {% if group.summary.total_cost is defined and group.summary.total_cost > 0 %}
+                    <span class="font-mono text-green-400">{{ group.summary.total_cost | format_cost }}</span>
                     {% endif %}
                 </div>
             </button>
@@ -152,6 +160,12 @@
                                 <div class="font-semibold text-claude-text font-mono text-xs">{{ s.total_input_tokens | compact_tokens }} / {{ s.total_output_tokens | compact_tokens }}</div>
                                 <div class="text-xs text-claude-muted">in / out</div>
                             </div>
+                            {% if s.cost is defined and s.cost > 0 %}
+                            <div class="text-center">
+                                <div class="font-semibold text-green-400 font-mono text-xs">{{ s.cost | format_cost }}</div>
+                                <div class="text-xs text-claude-muted">cost</div>
+                            </div>
+                            {% endif %}
                             <svg class="w-5 h-5 text-claude-muted group-hover:text-claude-accent2 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                             </svg>

@@ -2,14 +2,39 @@
 {% block title %}Dashboard - Claude Viewer{% endblock %}
 
 {% block sidebar %}
-{% for proj in projects %}
-<a href="/project/{{ proj.dir_name }}" class="nav-link block px-3 py-2 rounded-md text-sm text-claude-text truncate" title="{{ proj.name }} ({{ proj.session_count }} sessions)">
-    <span class="mr-2">📂</span>{{ proj.name }}
-    <span class="text-claude-muted text-xs ml-1">({{ proj.session_count }})</span>
-</a>
-{% endfor %}
-{% if not projects %}
-<p class="text-xs text-claude-muted px-3 py-2">No projects found</p>
+<div class="px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Quick Stats</div>
+    <div class="space-y-2 text-xs">
+        <div class="flex justify-between">
+            <span class="text-claude-muted">Projects</span>
+            <span class="text-claude-text font-mono">{{ project_count }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-claude-muted">Sessions</span>
+            <span class="text-claude-text font-mono">{{ stats.total_sessions | format_tokens }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-claude-muted">Messages</span>
+            <span class="text-claude-text font-mono">{{ stats.total_messages | format_tokens }}</span>
+        </div>
+        {% if stats.total_cost_usd > 0 %}
+        <div class="flex justify-between">
+            <span class="text-claude-muted">Total Cost</span>
+            <span class="text-green-400 font-mono">{{ stats.total_cost_usd | format_cost }}</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% if projects %}
+<div class="mt-4 px-3">
+    <div class="text-xs text-claude-muted uppercase tracking-wider mb-2">Projects</div>
+    {% for p in projects %}
+    <a href="/project/{{ p.dir_name }}" class="flex justify-between px-2 py-1 text-xs text-claude-text truncate rounded hover:bg-claude-surface2 transition-colors" title="{{ p.name }} ({{ p.session_count }} sessions)">
+        <span class="truncate">{{ p.name }}</span>
+        <span class="text-claude-muted ml-1 flex-shrink-0">({{ p.session_count }})</span>
+    </a>
+    {% endfor %}
+</div>
 {% endif %}
 {% endblock %}
 
